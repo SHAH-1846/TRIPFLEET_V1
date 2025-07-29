@@ -11,17 +11,17 @@ const { Types } = require("mongoose");
 const Documents = require("../db/models/documents");
 
 // Utils
-const { 
-  success, 
-  created, 
-  updated, 
-  deleted, 
-  badRequest, 
-  unauthorized, 
-  forbidden, 
-  notFound, 
-  conflict, 
-  serverError 
+const {
+  success,
+  created,
+  updated,
+  deleted,
+  badRequest,
+  unauthorized,
+  forbidden,
+  notFound,
+  conflict,
+  serverError,
 } = require("../utils/response-handler");
 
 // Validation schemas
@@ -40,7 +40,7 @@ exports.uploadDocument = async (req, res) => {
     let otpId = req.user?.id;
     let user = null;
 
-    if (tokenType === 'phone_verified_login') {
+    if (tokenType === "phone_verified_login") {
       // Registered user: must exist and be active
       user = await require("../db/models/users").findById(userId);
       if (!user || !user.isActive) {
@@ -50,18 +50,21 @@ exports.uploadDocument = async (req, res) => {
         const response = unauthorized("User not found or inactive");
         return res.status(response.statusCode).json(response);
       }
-    } else if (tokenType === 'phone_verified_registration') {
-      // Unregistered user: allow upload, associate with phone/otpId
-      userId = null;
-      // phone and otpId are available from token
     } else {
       // Invalid or missing token type
       if (req.file && req.file.path && fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
       }
-      const response = unauthorized("Invalid or missing authentication context");
+      const response = unauthorized(
+        "Invalid or missing authentication context"
+      );
       return res.status(response.statusCode).json(response);
     }
+    // else if (tokenType === 'phone_verified_registration') {
+    //   // Unregistered user: allow upload, associate with phone/otpId
+    //   userId = null;
+    //   // phone and otpId are available from token
+    // }
 
     // Check if file exists
     if (!req.file) {
@@ -70,18 +73,18 @@ exports.uploadDocument = async (req, res) => {
     }
 
     // Validate request data
-    const { error, value } = fileSchemas.uploadDocument.validate(req.body, { 
-      abortEarly: false, 
-      stripUnknown: true 
+    const { error, value } = fileSchemas.uploadDocument.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true,
     });
 
     if (error) {
       if (req.file && req.file.path && fs.existsSync(req.file.path)) {
         fs.unlinkSync(req.file.path);
       }
-      const errors = error.details.map(detail => ({
-        field: detail.path.join('.'),
-        message: detail.message
+      const errors = error.details.map((detail) => ({
+        field: detail.path.join("."),
+        message: detail.message,
       }));
       const response = badRequest("Validation failed", errors);
       return res.status(response.statusCode).json(response);
@@ -89,19 +92,21 @@ exports.uploadDocument = async (req, res) => {
 
     // Validate file type
     const allowedTypes = [
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'image/jpeg',
-      'image/png',
-      'image/webp'
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "image/jpeg",
+      "image/png",
+      "image/webp",
     ];
-    
+
     if (!allowedTypes.includes(req.file.mimetype)) {
       // Delete uploaded file
       fs.unlinkSync(req.file.path);
-      
-      const response = badRequest("Invalid file type. Only PDF, DOC, DOCX, JPEG, PNG, and WebP are allowed");
+
+      const response = badRequest(
+        "Invalid file type. Only PDF, DOC, DOCX, JPEG, PNG, and WebP are allowed"
+      );
       return res.status(response.statusCode).json(response);
     }
 
@@ -110,7 +115,7 @@ exports.uploadDocument = async (req, res) => {
     if (req.file.size > maxSize) {
       // Delete uploaded file
       fs.unlinkSync(req.file.path);
-      
+
       const response = badRequest("File size too large. Maximum size is 20MB");
       return res.status(response.statusCode).json(response);
     }
@@ -136,18 +141,17 @@ exports.uploadDocument = async (req, res) => {
       fileSize: req.file.size,
       mimeType: req.file.mimetype,
       type: value.type,
-      category: value.category || 'general',
+      category: value.category || "general",
       uploadedBy: userId || undefined,
       phone: !userId && phone ? phone : undefined,
       otpId: !userId && otpId ? otpId : undefined,
-      isActive: true
+      isActive: true,
     };
-    
 
     const newDocument = await Documents.create(documentData);
 
     const response = created(
-      { 
+      {
         document: {
           _id: newDocument._id,
           originalName: newDocument.originalName,
@@ -159,22 +163,21 @@ exports.uploadDocument = async (req, res) => {
           category: newDocument.category,
           uploadedAt: newDocument.createdAt,
           phone: newDocument.phone,
-          otpId: newDocument.otpId
-        }
+          otpId: newDocument.otpId,
+        },
       },
       "Document uploaded successfully"
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Upload document error:", error);
-    
+
     // Clean up uploaded file if it exists
     if (req.file && req.file.path && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
-    
+
     const response = serverError("Failed to upload document");
     return res.status(response.statusCode).json(response);
   }
@@ -199,33 +202,35 @@ exports.getAllDocuments = async (req, res) => {
 
     // Build filter object
     const filter = { isActive: true };
-    
+
     // Filter by user role
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'driver' || userType.name === 'customer') {
+    const userType = await require("../db/models/user_types").findById(
+      user.user_type
+    );
+    if (userType.name === "driver" || userType.name === "customer") {
       filter.uploadedBy = userId;
     }
     // Admin can see all documents
-    
+
     if (type) {
       filter.type = type;
     }
-    
+
     if (category) {
       filter.category = category;
     }
-    
+
     if (uploadedBy) {
       filter.uploadedBy = uploadedBy;
     }
 
     // Get documents with pagination
     const documentsData = await Documents.find(filter)
-      .populate('uploadedBy', 'name email')
+      .populate("uploadedBy", "name email")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit))
-      .select('-filePath'); // Don't expose file paths
+      .select("-filePath"); // Don't expose file paths
 
     // Get total count
     const total = await Documents.countDocuments(filter);
@@ -241,13 +246,12 @@ exports.getAllDocuments = async (req, res) => {
           total,
           totalPages: Math.ceil(total / limit),
           hasNext: page < Math.ceil(total / limit),
-          hasPrev: page > 1
-        }
+          hasPrev: page > 1,
+        },
       }
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Get all documents error:", error);
     const response = serverError("Failed to retrieve documents");
@@ -272,8 +276,10 @@ exports.getDocumentById = async (req, res) => {
     }
 
     // Get document
-    const document = await Documents.findById(documentId)
-      .populate('uploadedBy', 'name email');
+    const document = await Documents.findById(documentId).populate(
+      "uploadedBy",
+      "name email"
+    );
 
     if (!document) {
       const response = notFound("Document not found");
@@ -281,8 +287,10 @@ exports.getDocumentById = async (req, res) => {
     }
 
     // Check access permissions
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'driver' || userType.name === 'customer') {
+    const userType = await require("../db/models/user_types").findById(
+      user.user_type
+    );
+    if (userType.name === "driver" || userType.name === "customer") {
       if (document.uploadedBy._id.toString() !== userId) {
         const response = forbidden("Access denied");
         return res.status(response.statusCode).json(response);
@@ -301,7 +309,7 @@ exports.getDocumentById = async (req, res) => {
       category: document.category,
       uploadedBy: document.uploadedBy,
       uploadedAt: document.createdAt,
-      updatedAt: document.updatedAt
+      updatedAt: document.updatedAt,
     };
 
     const response = success(
@@ -310,7 +318,6 @@ exports.getDocumentById = async (req, res) => {
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Get document by ID error:", error);
     const response = serverError("Failed to retrieve document");
@@ -342,8 +349,10 @@ exports.updateDocument = async (req, res) => {
     }
 
     // Check if user can update this document
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'driver' || userType.name === 'customer') {
+    const userType = await require("../db/models/user_types").findById(
+      user.user_type
+    );
+    if (userType.name === "driver" || userType.name === "customer") {
       if (document.uploadedBy.toString() !== userId) {
         const response = forbidden("Access denied");
         return res.status(response.statusCode).json(response);
@@ -353,14 +362,14 @@ exports.updateDocument = async (req, res) => {
     // Update document
     const updatedDocument = await Documents.findByIdAndUpdate(
       documentId,
-      { 
+      {
         category: req.body.category,
-        updatedAt: new Date()
+        updatedAt: new Date(),
       },
       { new: true }
     )
-    .populate('uploadedBy', 'name email')
-    .select('-filePath');
+      .populate("uploadedBy", "name email")
+      .select("-filePath");
 
     const response = updated(
       { document: updatedDocument },
@@ -368,7 +377,6 @@ exports.updateDocument = async (req, res) => {
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Update document error:", error);
     const response = serverError("Failed to update document");
@@ -400,8 +408,10 @@ exports.deleteDocument = async (req, res) => {
     }
 
     // Check if user can delete this document
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'driver' || userType.name === 'customer') {
+    const userType = await require("../db/models/user_types").findById(
+      user.user_type
+    );
+    if (userType.name === "driver" || userType.name === "customer") {
       if (document.uploadedBy.toString() !== userId) {
         const response = forbidden("Access denied");
         return res.status(response.statusCode).json(response);
@@ -425,12 +435,11 @@ exports.deleteDocument = async (req, res) => {
       isActive: false,
       deletedAt: new Date(),
       deletedBy: userId,
-      updatedAt: new Date()
+      updatedAt: new Date(),
     });
 
     const response = deleted("Document deleted successfully");
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Delete document error:", error);
     const response = serverError("Failed to delete document");
@@ -455,9 +464,11 @@ exports.getDocumentStats = async (req, res) => {
 
     // Build filter based on user role
     const filter = { isActive: true };
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    
-    if (userType.name === 'driver' || userType.name === 'customer') {
+    const userType = await require("../db/models/user_types").findById(
+      user.user_type
+    );
+
+    if (userType.name === "driver" || userType.name === "customer") {
       filter.uploadedBy = userId;
     }
     // Admin can see all stats
@@ -469,22 +480,22 @@ exports.getDocumentStats = async (req, res) => {
         $group: {
           _id: null,
           total: { $sum: 1 },
-          totalSize: { $sum: '$fileSize' },
-          avgSize: { $avg: '$fileSize' },
+          totalSize: { $sum: "$fileSize" },
+          avgSize: { $avg: "$fileSize" },
           byType: {
             $push: {
-              type: '$type',
-              category: '$category'
-            }
-          }
-        }
-      }
+              type: "$type",
+              category: "$category",
+            },
+          },
+        },
+      },
     ]);
 
     // Process type statistics
     const typeStats = {};
     if (stats[0] && stats[0].byType) {
-      stats[0].byType.forEach(item => {
+      stats[0].byType.forEach((item) => {
         if (!typeStats[item.type]) {
           typeStats[item.type] = 0;
         }
@@ -493,19 +504,18 @@ exports.getDocumentStats = async (req, res) => {
     }
 
     const response = success(
-      { 
+      {
         stats: {
           total: stats[0]?.total || 0,
           totalSize: stats[0]?.totalSize || 0,
           avgSize: stats[0]?.avgSize || 0,
-          byType: typeStats
-        }
+          byType: typeStats,
+        },
       },
       "Document statistics retrieved successfully"
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Get document stats error:", error);
     const response = serverError("Failed to retrieve document statistics");
@@ -517,20 +527,20 @@ exports.getDocumentStats = async (req, res) => {
 const checkDocumentUsage = async (documentId) => {
   try {
     // Check if document is used in user profiles
-    const userProfile = await require("../db/models/users").findOne({ 
+    const userProfile = await require("../db/models/users").findOne({
       $or: [
         { drivingLicense: documentId },
-        { registrationCertificate: documentId }
-      ]
+        { registrationCertificate: documentId },
+      ],
     });
     if (userProfile) return true;
 
     // Check if document is used in vehicles
-    const vehicleDocuments = await require("../db/models/vehicles").findOne({ 
+    const vehicleDocuments = await require("../db/models/vehicles").findOne({
       $or: [
         { registrationCertificate: documentId },
-        { drivingLicense: documentId }
-      ]
+        { drivingLicense: documentId },
+      ],
     });
     if (vehicleDocuments) return true;
 

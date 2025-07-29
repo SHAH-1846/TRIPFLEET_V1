@@ -11,17 +11,17 @@ const { Types } = require("mongoose");
 const images = require("../db/models/images");
 
 // Utils
-const { 
-  success, 
-  created, 
-  updated, 
-  deleted, 
-  badRequest, 
-  unauthorized, 
-  forbidden, 
-  notFound, 
-  conflict, 
-  serverError 
+const {
+  success,
+  created,
+  updated,
+  deleted,
+  badRequest,
+  unauthorized,
+  forbidden,
+  notFound,
+  conflict,
+  serverError,
 } = require("../utils/response-handler");
 
 // Validation schemas
@@ -33,12 +33,33 @@ const { fileSchemas } = require("../validations/schemas");
  */
 exports.uploadImage = async (req, res) => {
   try {
-    const userId = req.user.user_id;
+    const tokenType = req.user?.type;
+    let userId = req.user?.user_id;
+    let phone = req.user?.phone;
+    let otpId = req.user?.id;
 
-    // Check if user exists and is active
-    const user = await require("../db/models/users").findById(userId);
-    if (!user || !user.isActive) {
-      const response = unauthorized("User not found or inactive");
+    if (tokenType === "phone_verified_login") {
+      //Registered user : must exist and be active
+      const user = await require("../db/models/users").findById(userId);
+      if (!user || !user.isActive) {
+        if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+        }
+        const response = unauthorized("User not found or inactive");
+        return res.status(response.statusCode).json(response);
+      }
+    } else if (tokenType === "phone_verified_registration") {
+      // Unregistered user: allow upload, associate with phone/otpId
+      userId = null;
+      // phone and otpId are available from token
+    } else {
+      // Invalid or missing token type
+      if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
+      const response = unauthorized(
+        "Invalid or missing authentication context"
+      );
       return res.status(response.statusCode).json(response);
     }
 
@@ -49,28 +70,32 @@ exports.uploadImage = async (req, res) => {
     }
 
     // Validate request data
-    const { error, value } = fileSchemas.uploadImage.validate(req.body, { 
-      abortEarly: false, 
-      stripUnknown: true 
+    const { error, value } = fileSchemas.uploadImage.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true,
     });
 
     if (error) {
-      const errors = error.details.map(detail => ({
-        field: detail.path.join('.'),
-        message: detail.message
+      if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+        fs.unlinkSync(req.file.path);
+      }
+      const errors = error.details.map((detail) => ({
+        field: detail.path.join("."),
+        message: detail.message,
       }));
-      
       const response = badRequest("Validation failed", errors);
       return res.status(response.statusCode).json(response);
     }
 
     // Validate file type
-    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif"];
     if (!allowedTypes.includes(req.file.mimetype)) {
       // Delete uploaded file
       fs.unlinkSync(req.file.path);
-      
-      const response = badRequest("Invalid file type. Only JPEG, PNG, WebP, and GIF are allowed");
+
+      const response = badRequest(
+        "Invalid file type. Only JPEG, PNG, WebP, and GIF are allowed"
+      );
       return res.status(response.statusCode).json(response);
     }
 
@@ -79,7 +104,7 @@ exports.uploadImage = async (req, res) => {
     if (req.file.size > maxSize) {
       // Delete uploaded file
       fs.unlinkSync(req.file.path);
-      
+
       const response = badRequest("File size too large. Maximum size is 10MB");
       return res.status(response.statusCode).json(response);
     }
@@ -105,15 +130,17 @@ exports.uploadImage = async (req, res) => {
       fileSize: req.file.size,
       mimeType: req.file.mimetype,
       type: value.type,
-      category: value.category || 'general',
-      uploadedBy: userId,
-      isActive: true
+      category: value.category || "general",
+      uploadedBy: userId || undefined,
+      phone: !userId && phone ? phone : undefined,
+      otpId: !userId && otpId ? otpId : undefined,
+      isActive: true,
     };
 
     const newImage = await images.create(imageData);
 
     const response = created(
-      { 
+      {
         image: {
           _id: newImage._id,
           originalName: newImage.originalName,
@@ -123,22 +150,21 @@ exports.uploadImage = async (req, res) => {
           mimeType: newImage.mimeType,
           type: newImage.type,
           category: newImage.category,
-          uploadedAt: newImage.createdAt
-        }
+          uploadedAt: newImage.createdAt,
+        },
       },
       "Image uploaded successfully"
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Upload image error:", error);
-    
+
     // Clean up uploaded file if it exists
     if (req.file && req.file.path && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
-    
+
     const response = serverError("Failed to upload image");
     return res.status(response.statusCode).json(response);
   }
@@ -163,55 +189,52 @@ exports.getAllImages = async (req, res) => {
 
     // Build filter object
     const filter = { isActive: true };
-    
+
     // Filter by user role
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'driver' || userType.name === 'customer') {
+    const userType = await require("../db/models/user_types").findById(
+      user.user_type
+    );
+    if (userType.name === "driver" || userType.name === "customer") {
       filter.uploadedBy = userId;
     }
     // Admin can see all images
-    
+
     if (type) {
       filter.type = type;
     }
-    
+
     if (category) {
       filter.category = category;
     }
-    
+
     if (uploadedBy) {
       filter.uploadedBy = uploadedBy;
     }
 
     // Get images with pagination
-    const imagesData = await images.find(filter)
-      .populate('uploadedBy', 'name email')
+    const imagesData = await images
+      .find(filter)
+      .populate("uploadedBy", "name email")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit))
-      .select('-filePath'); // Don't expose file paths
+      .select("-filePath"); // Don't expose file paths
 
     // Get total count
     const total = await images.countDocuments(filter);
 
-    const response = success(
-      imagesData,
-      "Images retrieved successfully",
-      200,
-      {
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total,
-          totalPages: Math.ceil(total / limit),
-          hasNext: page < Math.ceil(total / limit),
-          hasPrev: page > 1
-        }
-      }
-    );
+    const response = success(imagesData, "Images retrieved successfully", 200, {
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasNext: page < Math.ceil(total / limit),
+        hasPrev: page > 1,
+      },
+    });
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Get all images error:", error);
     const response = serverError("Failed to retrieve images");
@@ -236,8 +259,9 @@ exports.getImageById = async (req, res) => {
     }
 
     // Get image
-    const image = await images.findById(imageId)
-      .populate('uploadedBy', 'name email');
+    const image = await images
+      .findById(imageId)
+      .populate("uploadedBy", "name email");
 
     if (!image) {
       const response = notFound("Image not found");
@@ -245,8 +269,10 @@ exports.getImageById = async (req, res) => {
     }
 
     // Check access permissions
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'driver' || userType.name === 'customer') {
+    const userType = await require("../db/models/user_types").findById(
+      user.user_type
+    );
+    if (userType.name === "driver" || userType.name === "customer") {
       if (image.uploadedBy._id.toString() !== userId) {
         const response = forbidden("Access denied");
         return res.status(response.statusCode).json(response);
@@ -265,7 +291,7 @@ exports.getImageById = async (req, res) => {
       category: image.category,
       uploadedBy: image.uploadedBy,
       uploadedAt: image.createdAt,
-      updatedAt: image.updatedAt
+      updatedAt: image.updatedAt,
     };
 
     const response = success(
@@ -274,7 +300,6 @@ exports.getImageById = async (req, res) => {
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Get image by ID error:", error);
     const response = serverError("Failed to retrieve image");
@@ -291,12 +316,10 @@ exports.updateImage = async (req, res) => {
     const { imageId } = req.params;
     const userId = req.user.user_id;
 
-    // Check if user exists and is active
-    const user = await require("../db/models/users").findById(userId);
-    if (!user || !user.isActive) {
-      const response = unauthorized("User not found or inactive");
-      return res.status(response.statusCode).json(response);
-    }
+    // Determine user context from token
+    const tokenType = req.user?.type;
+    let phone = req.user?.phone;
+    let otpId = req.user?.id;
 
     // Get image
     const image = await images.findById(imageId);
@@ -305,26 +328,41 @@ exports.updateImage = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
-    // Check if user can update this image
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'driver' || userType.name === 'customer') {
-      if (image.uploadedBy.toString() !== userId) {
+    if (tokenType === "phone_verified_login") {
+      // Registered user: must exist and be active
+      const user = await require("../db/models/users").findById(userId);
+      if (!user || !user.isActive) {
+        const response = unauthorized("User not found or inactive");
+        return res.status(response.statusCode).json(response);
+      }
+      // Only allow if image.uploadedBy == userId
+      if (!image.uploadedBy || image.uploadedBy.toString() !== userId) {
         const response = forbidden("Access denied");
         return res.status(response.statusCode).json(response);
       }
+    } else if (tokenType === "phone_verified_registration") {
+      // Only allow if image.phone == token.phone && image.otpId == token.id
+      if (!image.phone || !image.otpId || image.phone !== phone || image.otpId.toString() !== otpId) {
+        const response = forbidden("Access denied");
+        return res.status(response.statusCode).json(response);
+      }
+    } else {
+      const response = unauthorized("Invalid or missing authentication context");
+      return res.status(response.statusCode).json(response);
     }
 
     // Update image
-    const updatedImage = await images.findByIdAndUpdate(
-      imageId,
-      { 
-        category: req.body.category,
-        updatedAt: new Date()
-      },
-      { new: true }
-    )
-    .populate('uploadedBy', 'name email')
-    .select('-filePath');
+    const updatedImage = await images
+      .findByIdAndUpdate(
+        imageId,
+        {
+          category: req.body.category,
+          updatedAt: new Date(),
+        },
+        { new: true }
+      )
+      .populate("uploadedBy", "name email")
+      .select("-filePath");
 
     const response = updated(
       { image: updatedImage },
@@ -332,7 +370,6 @@ exports.updateImage = async (req, res) => {
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Update image error:", error);
     const response = serverError("Failed to update image");
@@ -348,28 +385,39 @@ exports.deleteImage = async (req, res) => {
   try {
     const { imageId } = req.params;
     const userId = req.user.user_id;
+    const tokenType = req.user?.type;
+    let phone = req.user?.phone;
+    let otpId = req.user?.id;
 
-    // Check if user exists and is active
-    const user = await require("../db/models/users").findById(userId);
-    if (!user || !user.isActive) {
-      const response = unauthorized("User not found or inactive");
-      return res.status(response.statusCode).json(response);
-    }
 
-    // Get image
+    // Get image and check if active
     const image = await images.findById(imageId);
-    if (!image) {
-      const response = notFound("Image not found");
+    if (!image || image.isActive === false) {
+      const response = notFound("Image not found or already deleted");
       return res.status(response.statusCode).json(response);
     }
 
-    // Check if user can delete this image
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'driver' || userType.name === 'customer') {
-      if (image.uploadedBy.toString() !== userId) {
+    if (tokenType === "phone_verified_login") {
+      // Registered user: must exist and be active
+      const user = await require("../db/models/users").findById(userId);
+      if (!user || !user.isActive) {
+        const response = unauthorized("User not found or inactive");
+        return res.status(response.statusCode).json(response);
+      }
+      // Only allow if image.uploadedBy == userId
+      if (!image.uploadedBy || image.uploadedBy.toString() !== userId) {
         const response = forbidden("Access denied");
         return res.status(response.statusCode).json(response);
       }
+    } else if (tokenType === "phone_verified_registration") {
+      // Only allow if image.phone == token.phone && image.otpId == token.id
+      if (!image.phone || !image.otpId || image.phone !== phone || image.otpId.toString() !== otpId) {
+        const response = forbidden("Access denied");
+        return res.status(response.statusCode).json(response);
+      }
+    } else {
+      const response = unauthorized("Invalid or missing authentication context");
+      return res.status(response.statusCode).json(response);
     }
 
     // Check if image is being used
@@ -389,12 +437,11 @@ exports.deleteImage = async (req, res) => {
       isActive: false,
       deletedAt: new Date(),
       deletedBy: userId,
-      updatedAt: new Date()
+      updatedAt: new Date(),
     });
 
     const response = deleted("Image deleted successfully");
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Delete image error:", error);
     const response = serverError("Failed to delete image");
@@ -419,9 +466,11 @@ exports.getImageStats = async (req, res) => {
 
     // Build filter based on user role
     const filter = { isActive: true };
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    
-    if (userType.name === 'driver' || userType.name === 'customer') {
+    const userType = await require("../db/models/user_types").findById(
+      user.user_type
+    );
+
+    if (userType.name === "driver" || userType.name === "customer") {
       filter.uploadedBy = userId;
     }
     // Admin can see all stats
@@ -433,22 +482,22 @@ exports.getImageStats = async (req, res) => {
         $group: {
           _id: null,
           total: { $sum: 1 },
-          totalSize: { $sum: '$fileSize' },
-          avgSize: { $avg: '$fileSize' },
+          totalSize: { $sum: "$fileSize" },
+          avgSize: { $avg: "$fileSize" },
           byType: {
             $push: {
-              type: '$type',
-              category: '$category'
-            }
-          }
-        }
-      }
+              type: "$type",
+              category: "$category",
+            },
+          },
+        },
+      },
     ]);
 
     // Process type statistics
     const typeStats = {};
     if (stats[0] && stats[0].byType) {
-      stats[0].byType.forEach(item => {
+      stats[0].byType.forEach((item) => {
         if (!typeStats[item.type]) {
           typeStats[item.type] = 0;
         }
@@ -457,19 +506,18 @@ exports.getImageStats = async (req, res) => {
     }
 
     const response = success(
-      { 
+      {
         stats: {
           total: stats[0]?.total || 0,
           totalSize: stats[0]?.totalSize || 0,
           avgSize: stats[0]?.avgSize || 0,
-          byType: typeStats
-        }
+          byType: typeStats,
+        },
       },
       "Image statistics retrieved successfully"
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Get image stats error:", error);
     const response = serverError("Failed to retrieve image statistics");
@@ -481,22 +529,22 @@ exports.getImageStats = async (req, res) => {
 const checkImageUsage = async (imageId) => {
   try {
     // Check if image is used in user profiles
-    const userProfile = await require("../db/models/users").findOne({ profilePicture: imageId });
+    const userProfile = await require("../db/models/users").findOne({
+      profilePicture: imageId,
+    });
     if (userProfile) return true;
 
     // Check if image is used in vehicles
-    const vehicleImages = await require("../db/models/vehicles").findOne({ 
-      $or: [
-        { truckImages: imageId },
-        { profilePicture: imageId }
-      ]
+    const vehicleImages = await require("../db/models/vehicles").findOne({
+      $or: [{ truckImages: imageId }, { profilePicture: imageId }],
     });
     if (vehicleImages) return true;
 
     // Check if image is used in customer requests
-    const customerRequestImages = await require("../db/models/customer_requests").findOne({ 
-      attachments: imageId 
-    });
+    const customerRequestImages =
+      await require("../db/models/customer_requests").findOne({
+        attachments: imageId,
+      });
     if (customerRequestImages) return true;
 
     return false;

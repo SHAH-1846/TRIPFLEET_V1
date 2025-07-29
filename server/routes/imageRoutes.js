@@ -72,10 +72,10 @@ const { fileSchemas } = require('../validations/schemas');
  */
 router.post('/upload',
   authenticateToken,
-  upload.single('image'),
-  validateFileUpload(['image/jpeg', 'image/png', 'image/webp', 'image/gif'], 10 * 1024 * 1024),
   sanitizeInput,
+  upload.single('image'),
   validateRequest(fileSchemas.uploadImage),
+  validateFileUpload(['image/jpeg', 'image/png', 'image/webp', 'image/gif'], 10 * 1024 * 1024),
   imageController.uploadImage
 );
 

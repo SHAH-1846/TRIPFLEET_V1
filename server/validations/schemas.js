@@ -116,7 +116,7 @@ const userSchemas = {
     privacyPolicyAccepted: fields.boolean
   }),
 
-  registerCustomer: Joi.object({
+  registerProfile: Joi.object({
     name: fields.name,
     email: fields.email,
     profilePicture: Joi.string().pattern(patterns.objectId).optional()

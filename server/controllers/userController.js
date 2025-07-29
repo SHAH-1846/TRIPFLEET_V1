@@ -205,7 +205,7 @@ exports.registerDriver = async (req, res) => {
  * Register Customer with basic profile information
  * @route POST /api/v1/users/register-customer
  */
-exports.registerCustomer = async (req, res) => {
+exports.registerProfile = async (req, res) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
     if (!token) {
@@ -276,8 +276,8 @@ exports.registerCustomer = async (req, res) => {
       name: value.name,
       phone,
       email: value.email.toLowerCase(),
-      user_type: CUSTOMER_USER_TYPE_ID,
-      profilePicture: value.profilePicture,
+      user_type: CUSTOMER_USER_TYPE_ID, //Seed datas for user_type
+      profilePicture: value.profilePicture,//Should exist, active and image db record should be updated with new_user _id
       termsAndConditionsAccepted: value.termsAndConditionsAccepted,
       privacyPolicyAccepted: value.privacyPolicyAccepted,
       isActive: true,

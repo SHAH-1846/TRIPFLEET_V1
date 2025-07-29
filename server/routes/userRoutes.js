@@ -38,10 +38,10 @@ router.post('/register-driver',
  * @desc Register a new customer with basic profile information
  * @access Public (requires phone verification token)
  */
-router.post('/register-customer',
+router.post('/profile',
   sanitizeInput,
-  validateRequest(userSchemas.registerCustomer),
-  userController.registerCustomer
+  validateRequest(userSchemas.registerProfile),
+  userController.registerProfile
 );
 
 /**
