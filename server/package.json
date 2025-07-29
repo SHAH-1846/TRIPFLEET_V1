@@ -1,0 +1,82 @@
+{
+  "name": "drivers-app-server",
+  "version": "2.0.0",
+  "description": "Optimized Drivers App Backend API with enhanced security, validation, and performance",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "docs": "jsdoc -c jsdoc.json",
+    "migrate": "node db/migrations/run-migrations.js",
+    "seed": "node db/seeders/run-seeders.js",
+    "cleanup": "node utils/cleanupOrphanedFiles.js",
+    "health": "curl http://localhost:3002/health"
+  },
+  "keywords": [
+    "drivers",
+    "transportation",
+    "logistics",
+    "api",
+    "express",
+    "mongodb",
+    "jwt"
+  ],
+  "author": "Drivers App Team",
+  "license": "MIT",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^7.1.5",
+    "express-session": "^1.17.3",
+    "helmet": "^7.1.0",
+    "joi": "^17.11.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.0.3",
+    "morgan": "^1.10.0",
+    "multer": "^1.4.5-lts.1",
+    "node-cron": "^3.0.3",
+    "otp-generator": "^4.0.1",
+    "passport": "^0.7.0",
+    "passport-google-oauth20": "^2.0.0",
+    "twilio": "^4.19.0",
+    "validator": "^13.11.0",
+    "compression": "^1.7.4",
+    "express-validator": "^7.0.1",
+    "express-winston": "^4.2.0",
+    "winston": "^3.11.0",
+    "redis": "^4.6.10",
+    "ioredis": "^5.3.2",
+    "express-mongo-sanitize": "^2.2.0",
+    "hpp": "^0.2.3",
+    "xss-clean": "^0.1.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2",
+    "jest": "^29.7.0",
+    "supertest": "^6.3.3",
+    "eslint": "^8.55.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-prettier": "^5.0.1",
+    "prettier": "^3.1.1",
+    "jsdoc": "^4.0.2"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-org/drivers-app-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-org/drivers-app-server/issues"
+  },
+  "homepage": "https://github.com/your-org/drivers-app-server#readme"
+}

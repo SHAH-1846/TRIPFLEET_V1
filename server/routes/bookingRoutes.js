@@ -1,0 +1,141 @@
+/**
+ * Booking Management Routes
+ * Handles all booking-related endpoints with proper authentication and authorization
+ */
+
+const express = require('express');
+const router = express.Router();
+
+// Controllers
+const bookingController = require('../controllers/bookingController');
+
+// Middleware
+const { 
+  authenticateToken, 
+  requireRole, 
+  validateRequest, 
+  sanitizeInput,
+  validateObjectId,
+  pagination
+} = require('../utils/middleware');
+
+// Validation schemas
+const { bookingSchemas } = require('../validations/schemas');
+
+/**
+ * @route POST /api/v1/bookings
+ * @desc Create a new booking
+ * @access Private (driver users)
+ */
+router.post('/',
+  authenticateToken,
+  requireRole(['driver']),
+  sanitizeInput,
+  validateRequest(bookingSchemas.createBooking),
+  bookingController.createBooking
+);
+
+/**
+ * @route GET /api/v1/bookings
+ * @desc Get all bookings with pagination and filtering
+ * @access Private (authenticated users)
+ */
+router.get('/',
+  authenticateToken,
+  pagination,
+  bookingController.getAllBookings
+);
+
+/**
+ * @route GET /api/v1/bookings/stats
+ * @desc Get booking statistics
+ * @access Private (authenticated users)
+ */
+router.get('/stats',
+  authenticateToken,
+  bookingController.getBookingStats
+);
+
+/**
+ * @route GET /api/v1/bookings/:bookingId
+ * @desc Get specific booking by ID
+ * @access Private (authenticated users - booking owner or trip owner)
+ */
+router.get('/:bookingId',
+  authenticateToken,
+  validateObjectId('bookingId'),
+  bookingController.getBookingById
+);
+
+/**
+ * @route PUT /api/v1/bookings/:bookingId
+ * @desc Update booking information
+ * @access Private (booking owner or trip owner)
+ */
+router.put('/:bookingId',
+  authenticateToken,
+  validateObjectId('bookingId'),
+  sanitizeInput,
+  validateRequest(bookingSchemas.updateBooking),
+  bookingController.updateBooking
+);
+
+/**
+ * @route PUT /api/v1/bookings/:bookingId/accept
+ * @desc Accept booking (customer only)
+ * @access Private (trip owner)
+ */
+router.put('/:bookingId/accept',
+  authenticateToken,
+  requireRole(['customer']),
+  validateObjectId('bookingId'),
+  bookingController.acceptBooking
+);
+
+/**
+ * @route PUT /api/v1/bookings/:bookingId/reject
+ * @desc Reject booking (customer only)
+ * @access Private (trip owner)
+ */
+router.put('/:bookingId/reject',
+  authenticateToken,
+  requireRole(['customer']),
+  validateObjectId('bookingId'),
+  bookingController.rejectBooking
+);
+
+/**
+ * @route PUT /api/v1/bookings/:bookingId/cancel
+ * @desc Cancel booking
+ * @access Private (booking owner or trip owner)
+ */
+router.put('/:bookingId/cancel',
+  authenticateToken,
+  validateObjectId('bookingId'),
+  bookingController.cancelBooking
+);
+
+/**
+ * @route PUT /api/v1/bookings/:bookingId/complete
+ * @desc Complete booking (driver only)
+ * @access Private (assigned driver)
+ */
+router.put('/:bookingId/complete',
+  authenticateToken,
+  requireRole(['driver']),
+  validateObjectId('bookingId'),
+  bookingController.completeBooking
+);
+
+/**
+ * @route DELETE /api/v1/bookings/:bookingId
+ * @desc Delete booking (soft delete)
+ * @access Private (booking owner or admin)
+ */
+router.delete('/:bookingId',
+  authenticateToken,
+  validateObjectId('bookingId'),
+  bookingController.deleteBooking
+);
+
+module.exports = router;
