@@ -13,7 +13,14 @@ const users = require("../db/models/users");
 const OTP = require("../db/models/otp");
 
 // Utils
-const { success, created, unauthorized, badRequest, validationError, serverError } = require("../utils/response-handler");
+const {
+  success,
+  created,
+  unauthorized,
+  badRequest,
+  validationError,
+  serverError,
+} = require("../utils/response-handler");
 const { sendSMS } = require("../utils/sms");
 
 // Validation schemas
@@ -32,9 +39,10 @@ exports.login = async (req, res) => {
     const { email, password } = req.body;
 
     // Find user by email
-    const user = await users.findOne({ email: email.toLowerCase() })
-      .populate('user_type', 'name')
-      .select('+password');
+    const user = await users
+      .findOne({ email: email.toLowerCase() })
+      .populate("user_type", "name")
+      .select("+password");
 
     if (!user) {
       const response = unauthorized("Invalid email or password");
@@ -50,16 +58,18 @@ exports.login = async (req, res) => {
 
     // Check if user is active
     if (!user.isActive) {
-      const response = unauthorized("Account is deactivated. Please contact support.");
+      const response = unauthorized(
+        "Account is deactivated. Please contact support."
+      );
       return res.status(response.statusCode).json(response);
     }
 
     // Generate access token
     const accessToken = jwt.sign(
-      { 
+      {
         user_id: user._id,
         user_type: user.user_type.name,
-        email: user.email
+        email: user.email,
       },
       process.env.PRIVATE_KEY,
       { expiresIn: TOKEN_EXPIRY }
@@ -74,7 +84,7 @@ exports.login = async (req, res) => {
       user_type: user.user_type,
       profilePicture: user.profilePicture,
       isActive: user.isActive,
-      lastLogin: new Date()
+      lastLogin: new Date(),
     };
 
     // Update last login
@@ -84,9 +94,8 @@ exports.login = async (req, res) => {
       { user: userData, accessToken },
       "Login successful"
     );
-    
-    return res.status(response.statusCode).json(response);
 
+    return res.status(response.statusCode).json(response);
   } catch (error) {
     console.error("Login error:", error);
     const response = serverError("Authentication failed");
@@ -103,19 +112,22 @@ exports.requestOtp = async (req, res) => {
     const { phone } = req.body;
 
     // Check if phone number already exists
-    const existingUser = await users.findOne({ phone });
-    if (existingUser) {
-      const response = badRequest("Phone number already registered");
-      return res.status(response.statusCode).json(response);
-    }
+    // const existingUser = await users.findOne({ phone });
+    // if (existingUser) {
+    //   const response = badRequest("Phone number already registered");
+    //   return res.status(response.statusCode).json(response);
+    // }
 
     // Generate OTP
-    const otp = process.env.NODE_ENV === 'development' ? "123456" : otpGenerator.generate(6, {
-      digits: true,
-      alphabets: false,
-      upperCase: false,
-      specialChars: false,
-    });
+    const otp =
+      process.env.NODE_ENV === "development"
+        ? "123456"
+        : otpGenerator.generate(6, {
+            digits: true,
+            alphabets: false,
+            upperCase: false,
+            specialChars: false,
+          });
 
     // Hash OTP
     const salt = await bcrypt.genSalt(10);
@@ -124,18 +136,21 @@ exports.requestOtp = async (req, res) => {
     // Save or update OTP record
     const otpRecord = await OTP.findOneAndUpdate(
       { phone },
-      { 
+      {
         otp: hashedOtp,
         createdAt: new Date(),
-        attempts: 0
+        attempts: 0,
       },
       { upsert: true, new: true }
     );
 
     // Send OTP via SMS (in production)
-    if (process.env.NODE_ENV === 'production') {
+    if (process.env.NODE_ENV === "production") {
       try {
-        await sendSMS(phone, `Your verification code is ${otp}. Valid for ${OTP_EXPIRY_MINUTES} minutes.`);
+        await sendSMS(
+          phone,
+          `Your verification code is ${otp}. Valid for ${OTP_EXPIRY_MINUTES} minutes.`
+        );
       } catch (smsError) {
         console.error("SMS sending failed:", smsError);
         // Continue with OTP creation even if SMS fails
@@ -144,25 +159,27 @@ exports.requestOtp = async (req, res) => {
 
     // Generate OTP request token
     const otpRequestToken = jwt.sign(
-      { 
+      {
         id: otpRecord._id,
         phone: otpRecord.phone,
-        type: 'otp_request'
+        type: "otp_request",
       },
       process.env.PRIVATE_KEY,
       { expiresIn: TOKEN_EXPIRY }
     );
 
     const response = success(
-      { 
+      {
         otpRequestToken,
-        message: process.env.NODE_ENV === 'development' ? `Development OTP: ${otp}` : "OTP sent successfully"
+        message:
+          process.env.NODE_ENV === "development"
+            ? `Development OTP: ${otp}`
+            : "OTP sent successfully",
       },
       "OTP sent successfully"
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("OTP request error:", error);
     const response = serverError("Failed to send OTP");
@@ -177,7 +194,7 @@ exports.requestOtp = async (req, res) => {
 exports.verifyOtp = async (req, res) => {
   try {
     const { otp } = req.body;
-    const token = req.headers.authorization?.split(' ')[1];
+    const token = req.headers.authorization?.split(" ")[1];
 
     if (!token) {
       const response = unauthorized("OTP request token required");
@@ -193,7 +210,7 @@ exports.verifyOtp = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
-    if (decoded.type !== 'otp_request') {
+    if (decoded.type !== "otp_request") {
       const response = unauthorized("Invalid token type");
       return res.status(response.statusCode).json(response);
     }
@@ -219,7 +236,9 @@ exports.verifyOtp = async (req, res) => {
     // Check attempt limit
     if (otpRecord.attempts >= 3) {
       await OTP.findByIdAndDelete(otpRecord._id);
-      const response = badRequest("Too many failed attempts. Please request a new OTP.");
+      const response = badRequest(
+        "Too many failed attempts. Please request a new OTP."
+      );
       return res.status(response.statusCode).json(response);
     }
 
@@ -240,48 +259,49 @@ exports.verifyOtp = async (req, res) => {
       console.log("User exists");
       // User exists - generate login token
       phoneVerifiedToken = jwt.sign(
-        { 
+        {
           user_id: existingUser._id,
           user_type: existingUser.user_type,
           phone: existingUser.phone,
-          type: 'phone_verified_login'
+          type: "phone_verified_login",
         },
         process.env.PRIVATE_KEY,
         { expiresIn: TOKEN_EXPIRY }
       );
+
+      // Clean up OTP record
+      await OTP.findByIdAndDelete(otpRecord._id);
     } else {
       console.log("User does not exist");
       // New user - generate registration token
       phoneVerifiedToken = jwt.sign(
-        { 
+        {
           id: otpRecord._id,
           phone: otpRecord.phone,
-          type: 'phone_verified_registration'
+          type: "phone_verified_registration",
         },
         process.env.PRIVATE_KEY,
         { expiresIn: TOKEN_EXPIRY }
       );
     }
 
-    // Clean up OTP record
-    await OTP.findByIdAndDelete(otpRecord._id);
-
     const response = success(
-      { 
+      {
         phoneVerifiedToken,
         isNewUser: !existingUser,
-        user: existingUser ? {
-          _id: existingUser._id,
-          name: existingUser.name,
-          email: existingUser.email,
-          user_type: existingUser.user_type
-        } : null
+        user: existingUser
+          ? {
+              _id: existingUser._id,
+              name: existingUser.name,
+              email: existingUser.email,
+              user_type: existingUser.user_type,
+            }
+          : null,
       },
       "OTP verified successfully"
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("OTP verification error:", error);
     const response = serverError("OTP verification failed");
@@ -296,23 +316,27 @@ exports.verifyOtp = async (req, res) => {
 exports.googleOAuth = async (req, res) => {
   try {
     const userId = req.session.passport?.user;
-    
+
     if (!userId) {
-      return res.redirect(`${process.env.FRONTEND_URL}/auth/error?message=Authentication failed`);
+      return res.redirect(
+        `${process.env.FRONTEND_URL}/auth/error?message=Authentication failed`
+      );
     }
 
-    const user = await users.findById(userId).populate('user_type', 'name');
-    
+    const user = await users.findById(userId).populate("user_type", "name");
+
     if (!user) {
-      return res.redirect(`${process.env.FRONTEND_URL}/auth/error?message=User not found`);
+      return res.redirect(
+        `${process.env.FRONTEND_URL}/auth/error?message=User not found`
+      );
     }
 
     // Generate access token
     const accessToken = jwt.sign(
-      { 
+      {
         user_id: user._id,
         user_type: user.user_type.name,
-        email: user.email
+        email: user.email,
       },
       process.env.PRIVATE_KEY,
       { expiresIn: TOKEN_EXPIRY }
@@ -322,11 +346,14 @@ exports.googleOAuth = async (req, res) => {
     await users.findByIdAndUpdate(user._id, { lastLogin: new Date() });
 
     // Redirect to frontend with token
-    return res.redirect(`${process.env.FRONTEND_URL}/auth/success?token=${accessToken}`);
-
+    return res.redirect(
+      `${process.env.FRONTEND_URL}/auth/success?token=${accessToken}`
+    );
   } catch (error) {
     console.error("Google OAuth error:", error);
-    return res.redirect(`${process.env.FRONTEND_URL}/auth/error?message=Authentication failed`);
+    return res.redirect(
+      `${process.env.FRONTEND_URL}/auth/error?message=Authentication failed`
+    );
   }
 };
 
@@ -353,7 +380,9 @@ exports.refreshToken = async (req, res) => {
     }
 
     // Check if user still exists
-    const user = await users.findById(decoded.user_id).populate('user_type', 'name');
+    const user = await users
+      .findById(decoded.user_id)
+      .populate("user_type", "name");
     if (!user || !user.isActive) {
       const response = unauthorized("User not found or inactive");
       return res.status(response.statusCode).json(response);
@@ -361,10 +390,10 @@ exports.refreshToken = async (req, res) => {
 
     // Generate new access token
     const newAccessToken = jwt.sign(
-      { 
+      {
         user_id: user._id,
         user_type: user.user_type.name,
-        email: user.email
+        email: user.email,
       },
       process.env.PRIVATE_KEY,
       { expiresIn: TOKEN_EXPIRY }
@@ -376,7 +405,6 @@ exports.refreshToken = async (req, res) => {
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Token refresh error:", error);
     const response = serverError("Token refresh failed");
@@ -392,10 +420,9 @@ exports.logout = async (req, res) => {
   try {
     // In a real application, you might want to blacklist the token
     // For now, we'll just return success as the client should remove the token
-    
+
     const response = success(null, "Logged out successfully");
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Logout error:", error);
     const response = serverError("Logout failed");

@@ -13,6 +13,7 @@
     "format": "prettier --write .",
     "docs": "jsdoc -c jsdoc.json",
     "migrate": "node db/migrations/run-migrations.js",
+    "seed:user_types": "node db/seeders/userTypeSeeder.js",
     "seed": "node db/seeders/run-seeders.js",
     "cleanup": "node utils/cleanupOrphanedFiles.js",
     "health": "curl http://localhost:3002/health"

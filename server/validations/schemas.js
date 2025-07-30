@@ -119,12 +119,14 @@ const userSchemas = {
   registerProfile: Joi.object({
     name: fields.name,
     email: fields.email,
+    whatsappNumber: fields.phone,
+    user_type: fields.objectId, // required user_type as objectId
     profilePicture: Joi.string().pattern(patterns.objectId).optional()
       .messages({
         'string.pattern.base': 'Invalid profile picture ID format'
       }),
-    termsAndConditionsAccepted: fields.boolean,
-    privacyPolicyAccepted: fields.boolean
+    // termsAndConditionsAccepted: fields.boolean,
+    // privacyPolicyAccepted: fields.boolean
   }),
 
   updateProfile: Joi.object({

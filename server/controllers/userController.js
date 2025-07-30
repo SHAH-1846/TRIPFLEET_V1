@@ -18,17 +18,17 @@ const Documents = require("../db/models/documents");
 const OTP = require("../db/models/otp");
 
 // Utils
-const { 
-  success, 
-  created, 
-  updated, 
-  deleted, 
-  badRequest, 
-  unauthorized, 
-  forbidden, 
-  notFound, 
-  conflict, 
-  serverError 
+const {
+  success,
+  created,
+  updated,
+  deleted,
+  badRequest,
+  unauthorized,
+  forbidden,
+  notFound,
+  conflict,
+  serverError,
 } = require("../utils/response-handler");
 const { sendSMS } = require("../utils/sms");
 
@@ -46,7 +46,7 @@ const CUSTOMER_USER_TYPE_ID = "68484d1eefb856d41ac28c57";
  */
 exports.registerDriver = async (req, res) => {
   try {
-    const token = req.headers.authorization?.split(' ')[1];
+    const token = req.headers.authorization?.split(" ")[1];
     if (!token) {
       const response = unauthorized("Access token required");
       return res.status(response.statusCode).json(response);
@@ -61,15 +61,19 @@ exports.registerDriver = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
-    if (decoded.type !== 'phone_verified_registration') {
-      const response = unauthorized("Invalid token type. Please verify your phone number first.");
+    if (decoded.type !== "phone_verified_registration") {
+      const response = unauthorized(
+        "Invalid token type. Please verify your phone number first."
+      );
       return res.status(response.statusCode).json(response);
     }
 
     // Find OTP record to get phone number
     const otpRecord = await OTP.findById(decoded.id);
     if (!otpRecord) {
-      const response = badRequest("Phone verification required. Please request OTP again.");
+      const response = badRequest(
+        "Phone verification required. Please request OTP again."
+      );
       return res.status(response.statusCode).json(response);
     }
 
@@ -77,39 +81,47 @@ exports.registerDriver = async (req, res) => {
     const documents = req.body.documents || [];
 
     // Validate request data
-    const { error, value } = userSchemas.registerDriver.validate(req.body, { 
-      abortEarly: false, 
-      stripUnknown: true 
+    const { error, value } = userSchemas.registerDriver.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true,
     });
 
     if (error) {
-      const errors = error.details.map(detail => ({
-        field: detail.path.join('.'),
-        message: detail.message
+      const errors = error.details.map((detail) => ({
+        field: detail.path.join("."),
+        message: detail.message,
       }));
-      
+
       const response = badRequest("Validation failed", errors);
       return res.status(response.statusCode).json(response);
     }
 
     // Check if user already exists
-    const existingUser = await users.findOne({ 
-      $or: [{ email: value.email.toLowerCase() }, { phone }] 
+    const existingUser = await users.findOne({
+      $or: [{ email: value.email.toLowerCase() }, { phone }],
     });
-    
+
     if (existingUser) {
-      const response = conflict("User already exists with this email or phone number");
+      const response = conflict(
+        "User already exists with this email or phone number"
+      );
       return res.status(response.statusCode).json(response);
     }
 
     // Validate document and image references
-    const validImageIds = await validateImageReferences([value.profilePicture, ...value.truckImages]);
-    const validDocumentIds = await validateDocumentReferences([value.drivingLicense, value.registrationCertificate]);
+    const validImageIds = await validateImageReferences([
+      value.profilePicture,
+      ...value.truckImages,
+    ]);
+    const validDocumentIds = await validateDocumentReferences([
+      value.drivingLicense,
+      value.registrationCertificate,
+    ]);
 
     if (!validImageIds.isValid || !validDocumentIds.isValid) {
       const response = badRequest("Invalid image or document references", {
         images: validImageIds.errors,
-        documents: validDocumentIds.errors
+        documents: validDocumentIds.errors,
       });
       return res.status(response.statusCode).json(response);
     }
@@ -142,7 +154,7 @@ exports.registerDriver = async (req, res) => {
       isActive: true,
       isPhoneVerified: true,
       isEmailVerified: false,
-      lastLogin: new Date()
+      lastLogin: new Date(),
     };
 
     const newUser = await users.create(userData);
@@ -158,7 +170,7 @@ exports.registerDriver = async (req, res) => {
       registrationCertificate: value.registrationCertificate,
       truckImages: value.truckImages,
       isActive: true,
-      isVerified: false
+      isVerified: false,
     };
 
     const newVehicle = await vehicles.create(vehicleData);
@@ -168,32 +180,32 @@ exports.registerDriver = async (req, res) => {
 
     // Generate access token
     const accessToken = jwt.sign(
-      { 
+      {
         user_id: newUser._id,
-        user_type: 'driver',
-        email: newUser.email
+        user_type: "driver",
+        email: newUser.email,
       },
       process.env.PRIVATE_KEY,
       { expiresIn: TOKEN_EXPIRY }
     );
 
     // Populate user data for response
-    const populatedUser = await users.findById(newUser._id)
-      .populate('user_type', 'name')
-      .populate('profilePicture', 'url')
-      .select('-password');
+    const populatedUser = await users
+      .findById(newUser._id)
+      .populate("user_type", "name")
+      .populate("profilePicture", "url")
+      .select("-password");
 
     const response = created(
-      { 
+      {
         user: populatedUser,
         vehicle: newVehicle,
-        accessToken
+        accessToken,
       },
       "Driver registered successfully"
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Driver registration error:", error);
     const response = serverError("Driver registration failed");
@@ -207,7 +219,7 @@ exports.registerDriver = async (req, res) => {
  */
 exports.registerProfile = async (req, res) => {
   try {
-    const token = req.headers.authorization?.split(' ')[1];
+    const token = req.headers.authorization?.split(" ")[1];
     if (!token) {
       const response = unauthorized("Access token required");
       return res.status(response.statusCode).json(response);
@@ -222,102 +234,170 @@ exports.registerProfile = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
-    if (decoded.type !== 'phone_verified_registration') {
-      const response = unauthorized("Invalid token type. Please verify your phone number first.");
+    if (decoded.type !== "phone_verified_registration") {
+      const response = unauthorized(
+        "Invalid token type. Please verify your phone number first."
+      );
       return res.status(response.statusCode).json(response);
     }
 
     // Find OTP record to get phone number
     const otpRecord = await OTP.findById(decoded.id);
     if (!otpRecord) {
-      const response = badRequest("Phone verification required. Please request OTP again.");
+      const response = badRequest(
+        "Phone verification required. Please request OTP again."
+      );
       return res.status(response.statusCode).json(response);
     }
 
     const phone = otpRecord.phone;
 
     // Validate request data
-    const { error, value } = userSchemas.registerCustomer.validate(req.body, { 
-      abortEarly: false, 
-      stripUnknown: true 
+    const { error, value } = userSchemas.registerProfile.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true,
     });
 
     if (error) {
-      const errors = error.details.map(detail => ({
-        field: detail.path.join('.'),
-        message: detail.message
+      const errors = error.details.map((detail) => ({
+        field: detail.path.join("."),
+        message: detail.message,
       }));
-      
+
       const response = badRequest("Validation failed", errors);
       return res.status(response.statusCode).json(response);
     }
 
-    // Check if user already exists
-    const existingUser = await users.findOne({ 
-      $or: [{ email: value.email.toLowerCase() }, { phone }] 
+    // Validate whatsappNumber: must be a valid phone
+    const phonePattern = /^\+?[1-9]\d{7,14}$/;
+    if (!value.whatsappNumber || !phonePattern.test(value.whatsappNumber)) {
+      const response = badRequest("Invalid WhatsApp number format");
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Check if user already exists (by email, phone, or whatsappNumber)
+    const existingUser = await users.findOne({
+      $or: [
+        { email: value.email.toLowerCase() },
+        { phone },
+        { whatsappNumber: value.whatsappNumber },
+      ],
     });
-    
+
     if (existingUser) {
-      const response = conflict("User already exists with this email or phone number");
+      let conflictField = "email or phone number";
+      if (existingUser.whatsappNumber === value.whatsappNumber) {
+        conflictField = "WhatsApp number";
+      }
+      const response = conflict(
+        `User already exists with this ${conflictField}`
+      );
       return res.status(response.statusCode).json(response);
     }
 
     // Validate profile picture if provided
     if (value.profilePicture) {
-      const validImage = await validateImageReference(value.profilePicture);
-      if (!validImage.isValid) {
-        const response = badRequest("Invalid profile picture reference", validImage.errors);
+      // Validate if it's a proper MongoDB ObjectId
+      if (!Types.ObjectId.isValid(value.profilePicture)) {
+        const response = badRequest("Invalid profile picture ID format");
+        return res.status(response.statusCode).json(response);
+      }
+      // Validate image exists
+      const image = await images.findById(value.profilePicture);
+      if (!image) {
+        const response = badRequest("Profile picture image not found");
+        return res.status(response.statusCode).json(response);
+      }
+      // Validate image.phone matches registration phone (for unregistered users)
+      if (image.phone && image.phone !== phone) {
+        const response = forbidden(
+          "Profile picture was not uploaded by this phone number"
+        );
         return res.status(response.statusCode).json(response);
       }
     }
 
-    // Create user with enhanced data
+    // Make user_type required and validate as ObjectId and existence
+    if (!value.user_type) {
+      const response = badRequest("user_type is required");
+      return res.status(response.statusCode).json(response);
+    }
+    if (!Types.ObjectId.isValid(value.user_type)) {
+      const response = badRequest("Invalid user_type ID format");
+      return res.status(response.statusCode).json(response);
+    }
+    const userTypeExists = await user_types.findById(value.user_type);
+    if (!userTypeExists) {
+      const response = badRequest("user_type does not exist");
+      return res.status(response.statusCode).json(response);
+    }
+    // Block registration if user_type is admin (by name or by known admin ObjectId)
+    const ADMIN_USER_TYPE_ID = "68484d1eefb856d41ac28c54";
+    if (
+      (userTypeExists.name && userTypeExists.name.toLowerCase() === "admin") ||
+      value.user_type === ADMIN_USER_TYPE_ID
+    ) {
+      const response = forbidden("Registration as admin is not allowed");
+      return res.status(response.statusCode).json(response);
+    }
+
     const userData = {
       name: value.name,
       phone,
+      whatsappNumber: value.whatsappNumber,
       email: value.email.toLowerCase(),
-      user_type: CUSTOMER_USER_TYPE_ID, //Seed datas for user_type
-      profilePicture: value.profilePicture,//Should exist, active and image db record should be updated with new_user _id
-      termsAndConditionsAccepted: value.termsAndConditionsAccepted,
-      privacyPolicyAccepted: value.privacyPolicyAccepted,
+      user_type: new Types.ObjectId(value.user_type), // Must be a valid ObjectId from frontend
+      profilePicture: value.profilePicture,
+      termsAndConditionsAccepted: true,
+      privacyPolicyAccepted: true,
       isActive: true,
       isPhoneVerified: true,
       isEmailVerified: false,
-      lastLogin: new Date()
+      lastLogin: new Date(),
     };
 
     const newUser = await users.create(userData);
+
+    // If profilePicture is provided, update image record with uploadedBy
+    if (value.profilePicture) {
+      await images.findByIdAndUpdate(value.profilePicture, {
+        uploadedBy: newUser._id,
+        phone: undefined, // clear phone association
+        otpId: undefined, // clear otpId association
+        updatedAt: new Date(),
+      });
+    }
 
     // Clean up OTP record
     await OTP.findByIdAndDelete(otpRecord._id);
 
     // Generate access token
     const accessToken = jwt.sign(
-      { 
+      {
         user_id: newUser._id,
-        user_type: 'customer',
-        email: newUser.email
+        user_type: "customer",
+        email: newUser.email,
       },
       process.env.PRIVATE_KEY,
       { expiresIn: TOKEN_EXPIRY }
     );
 
     // Populate user data for response
-    const populatedUser = await users.findById(newUser._id)
-      .populate('user_type', 'name')
-      .populate('profilePicture', 'url')
-      .select('-password');
+    const populatedUser = await users
+      .findById(newUser._id)
+      .populate("user_type", "name")
+      .populate("profilePicture", "url")
+      .select("-password");
 
     const response = created(
-      { 
+      {
         user: populatedUser,
-        accessToken
+        accessToken,
       },
-      "Customer registered successfully"
+      "Registration successful"
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Customer registration error:", error);
     const response = serverError("Customer registration failed");
@@ -333,10 +413,11 @@ exports.getProfile = async (req, res) => {
   try {
     const userId = req.user.user_id;
 
-    const user = await users.findById(userId)
-      .populate('user_type', 'name')
-      .populate('profilePicture', 'url filename')
-      .select('-password');
+    const user = await users
+      .findById(userId)
+      .populate("user_type", "name")
+      .populate("profilePicture", "url filename")
+      .select("-password");
 
     if (!user) {
       const response = notFound("User not found");
@@ -345,27 +426,27 @@ exports.getProfile = async (req, res) => {
 
     // Get additional data based on user type
     let additionalData = {};
-    
-    if (user.user_type.name === 'driver') {
-      const vehicle = await vehicles.findOne({ user: userId })
-        .populate('vehicleType', 'name')
-        .populate('vehicleBodyType', 'name')
-        .populate('registrationCertificate', 'url filename')
-        .populate('truckImages', 'url filename');
-      
+
+    if (user.user_type.name === "driver") {
+      const vehicle = await vehicles
+        .findOne({ user: userId })
+        .populate("vehicleType", "name")
+        .populate("vehicleBodyType", "name")
+        .populate("registrationCertificate", "url filename")
+        .populate("truckImages", "url filename");
+
       additionalData.vehicle = vehicle;
     }
 
     const response = success(
-      { 
+      {
         user,
-        ...additionalData
+        ...additionalData,
       },
       "Profile retrieved successfully"
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Get profile error:", error);
     const response = serverError("Failed to retrieve profile");
@@ -382,17 +463,17 @@ exports.updateProfile = async (req, res) => {
     const userId = req.user.user_id;
 
     // Validate request data
-    const { error, value } = userSchemas.updateProfile.validate(req.body, { 
-      abortEarly: false, 
-      stripUnknown: true 
+    const { error, value } = userSchemas.updateProfile.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true,
     });
 
     if (error) {
-      const errors = error.details.map(detail => ({
-        field: detail.path.join('.'),
-        message: detail.message
+      const errors = error.details.map((detail) => ({
+        field: detail.path.join("."),
+        message: detail.message,
       }));
-      
+
       const response = badRequest("Validation failed", errors);
       return res.status(response.statusCode).json(response);
     }
@@ -406,16 +487,16 @@ exports.updateProfile = async (req, res) => {
 
     // Check if email is being changed and if it's already taken
     if (value.email && value.email.toLowerCase() !== existingUser.email) {
-      const emailExists = await users.findOne({ 
+      const emailExists = await users.findOne({
         email: value.email.toLowerCase(),
-        _id: { $ne: userId }
+        _id: { $ne: userId },
       });
-      
+
       if (emailExists) {
         const response = conflict("Email already in use");
         return res.status(response.statusCode).json(response);
       }
-      
+
       value.email = value.email.toLowerCase();
       value.isEmailVerified = false; // Reset email verification
     }
@@ -424,23 +505,27 @@ exports.updateProfile = async (req, res) => {
     if (value.profilePicture) {
       const validImage = await validateImageReference(value.profilePicture);
       if (!validImage.isValid) {
-        const response = badRequest("Invalid profile picture reference", validImage.errors);
+        const response = badRequest(
+          "Invalid profile picture reference",
+          validImage.errors
+        );
         return res.status(response.statusCode).json(response);
       }
     }
 
     // Update user
-    const updatedUser = await users.findByIdAndUpdate(
-      userId,
-      { 
-        ...value,
-        updatedAt: new Date()
-      },
-      { new: true }
-    )
-    .populate('user_type', 'name')
-    .populate('profilePicture', 'url filename')
-    .select('-password');
+    const updatedUser = await users
+      .findByIdAndUpdate(
+        userId,
+        {
+          ...value,
+          updatedAt: new Date(),
+        },
+        { new: true }
+      )
+      .populate("user_type", "name")
+      .populate("profilePicture", "url filename")
+      .select("-password");
 
     const response = updated(
       { user: updatedUser },
@@ -448,7 +533,6 @@ exports.updateProfile = async (req, res) => {
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Update profile error:", error);
     const response = serverError("Failed to update profile");
@@ -466,17 +550,17 @@ exports.updateUserType = async (req, res) => {
     const { userType } = req.body;
 
     // Validate request data
-    const { error, value } = userSchemas.updateUserType.validate(req.body, { 
-      abortEarly: false, 
-      stripUnknown: true 
+    const { error, value } = userSchemas.updateUserType.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true,
     });
 
     if (error) {
-      const errors = error.details.map(detail => ({
-        field: detail.path.join('.'),
-        message: detail.message
+      const errors = error.details.map((detail) => ({
+        field: detail.path.join("."),
+        message: detail.message,
       }));
-      
+
       const response = badRequest("Validation failed", errors);
       return res.status(response.statusCode).json(response);
     }
@@ -496,16 +580,17 @@ exports.updateUserType = async (req, res) => {
     }
 
     // Update user type
-    const updatedUser = await users.findByIdAndUpdate(
-      userId,
-      { 
-        user_type: value.userType,
-        updatedAt: new Date()
-      },
-      { new: true }
-    )
-    .populate('user_type', 'name')
-    .select('-password');
+    const updatedUser = await users
+      .findByIdAndUpdate(
+        userId,
+        {
+          user_type: value.userType,
+          updatedAt: new Date(),
+        },
+        { new: true }
+      )
+      .populate("user_type", "name")
+      .select("-password");
 
     const response = updated(
       { user: updatedUser },
@@ -513,7 +598,6 @@ exports.updateUserType = async (req, res) => {
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Update user type error:", error);
     const response = serverError("Failed to update user type");
@@ -531,7 +615,7 @@ exports.updateUserStatus = async (req, res) => {
     const { status } = req.body; // expecting { status: 'active' } or { status: 'inactive' }
 
     // Validate status value
-    if (!['active', 'inactive'].includes(status)) {
+    if (!["active", "inactive"].includes(status)) {
       const response = badRequest("Status must be 'active' or 'inactive'");
       return res.status(response.statusCode).json(response);
     }
@@ -544,14 +628,15 @@ exports.updateUserStatus = async (req, res) => {
     }
 
     // Update status
-    user.isActive = status === 'active';
+    user.isActive = status === "active";
     user.updatedAt = new Date();
     await user.save();
 
-    const updatedUser = await users.findById(userId)
-      .populate('user_type', 'name')
-      .populate('profilePicture', 'url filename')
-      .select('-password');
+    const updatedUser = await users
+      .findById(userId)
+      .populate("user_type", "name")
+      .populate("profilePicture", "url filename")
+      .select("-password");
 
     const response = updated(
       { user: updatedUser },
@@ -576,28 +661,29 @@ exports.getAllUsers = async (req, res) => {
 
     // Build filter object
     const filter = {};
-    
+
     if (userType) {
       filter.user_type = userType;
     }
-    
+
     if (status) {
-      filter.isActive = status === 'active';
+      filter.isActive = status === "active";
     }
-    
+
     if (search) {
       filter.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } }
+        { name: { $regex: search, $options: "i" } },
+        { email: { $regex: search, $options: "i" } },
+        { phone: { $regex: search, $options: "i" } },
       ];
     }
 
     // Get users with pagination
-    const users = await users.find(filter)
-      .populate('user_type', 'name')
-      .populate('profilePicture', 'url')
-      .select('-password')
+    const users = await users
+      .find(filter)
+      .populate("user_type", "name")
+      .populate("profilePicture", "url")
+      .select("-password")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -605,24 +691,18 @@ exports.getAllUsers = async (req, res) => {
     // Get total count
     const total = await users.countDocuments(filter);
 
-    const response = success(
-      users,
-      "Users retrieved successfully",
-      200,
-      {
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total,
-          totalPages: Math.ceil(total / limit),
-          hasNext: page < Math.ceil(total / limit),
-          hasPrev: page > 1
-        }
-      }
-    );
+    const response = success(users, "Users retrieved successfully", 200, {
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / limit),
+        hasNext: page < Math.ceil(total / limit),
+        hasPrev: page > 1,
+      },
+    });
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Get all users error:", error);
     const response = serverError("Failed to retrieve users");
@@ -649,12 +729,11 @@ exports.deleteAccount = async (req, res) => {
     await users.findByIdAndUpdate(userId, {
       isActive: false,
       deletedAt: new Date(),
-      updatedAt: new Date()
+      updatedAt: new Date(),
     });
 
     const response = deleted("Account deleted successfully");
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Delete account error:", error);
     const response = serverError("Failed to delete account");
@@ -670,10 +749,11 @@ exports.getUserById = async (req, res) => {
   try {
     const { userId } = req.params;
 
-    const user = await users.findById(userId)
-      .populate('user_type', 'name')
-      .populate('profilePicture', 'url filename')
-      .select('-password');
+    const user = await users
+      .findById(userId)
+      .populate("user_type", "name")
+      .populate("profilePicture", "url filename")
+      .select("-password");
 
     if (!user) {
       const response = notFound("User not found");
@@ -682,12 +762,13 @@ exports.getUserById = async (req, res) => {
 
     // Get additional data based on user type
     let additionalData = {};
-    if (user.user_type && user.user_type.name === 'driver') {
-      const vehicle = await vehicles.findOne({ user: userId })
-        .populate('vehicleType', 'name')
-        .populate('vehicleBodyType', 'name')
-        .populate('registrationCertificate', 'url filename')
-        .populate('truckImages', 'url filename');
+    if (user.user_type && user.user_type.name === "driver") {
+      const vehicle = await vehicles
+        .findOne({ user: userId })
+        .populate("vehicleType", "name")
+        .populate("vehicleBodyType", "name")
+        .populate("registrationCertificate", "url filename")
+        .populate("truckImages", "url filename");
       additionalData.vehicle = vehicle;
     }
 
@@ -750,7 +831,7 @@ const validateImageReference = async (imageId) => {
 
 const validateImageReferences = async (imageIds) => {
   const errors = [];
-  
+
   for (const imageId of imageIds) {
     if (imageId) {
       const result = await validateImageReference(imageId);
@@ -782,7 +863,7 @@ const validateDocumentReference = async (documentId) => {
 
 const validateDocumentReferences = async (documentIds) => {
   const errors = [];
-  
+
   for (const documentId of documentIds) {
     if (documentId) {
       const result = await validateDocumentReference(documentId);
@@ -794,5 +875,3 @@ const validateDocumentReferences = async (documentIds) => {
 
   return { isValid: errors.length === 0, errors };
 };
-
-
