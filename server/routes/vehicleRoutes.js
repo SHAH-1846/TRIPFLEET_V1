@@ -73,6 +73,18 @@ router.get(
 );
 
 /**
+ * @route GET /api/v1/vehicles/driving-license
+ * @desc Get user's driving license information
+ * @access Private (driver users)
+ */
+router.get(
+  "/driving-license",
+  authenticateToken,
+  requireRole(["driver"]),
+  vehicleController.getUserDrivingLicense
+);
+
+/**
  * @route GET /api/v1/vehicles
  * @desc Get all vehicles with pagination and filtering
  * @access Private (authenticated users)
@@ -156,6 +168,18 @@ router.delete(
   authenticateToken,
   validateObjectId("vehicleId"),
   vehicleController.deleteVehicle
+);
+
+/**
+ * @route GET /api/v1/vehicles/:vehicleId/truck-images
+ * @desc Get vehicle truck images count and details
+ * @access Private (vehicle owner or admin)
+ */
+router.get(
+  "/:vehicleId/truck-images",
+  authenticateToken,
+  validateObjectId("vehicleId"),
+  vehicleController.getVehicleTruckImages
 );
 
 module.exports = router;

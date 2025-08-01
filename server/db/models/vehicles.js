@@ -57,7 +57,7 @@ const vehicles = new mongoose.Schema(
     model: { type: String },
     color: { type: String },
 
-    images: [
+    truckImages: [
       {
         type: mongoose.Schema.Types.ObjectId,
         ref: "images",
@@ -90,5 +90,29 @@ const vehicles = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+// Custom validation for minimum 4 truck images
+vehicles.pre('save', function(next) {
+  if (this.truckImages && this.truckImages.length < 4) {
+    return next(new Error('At least 4 truck images are required'));
+  }
+  next();
+});
+
+vehicles.pre('findOneAndUpdate', function(next) {
+  const update = this.getUpdate();
+  if (update.truckImages && update.truckImages.length < 4) {
+    return next(new Error('At least 4 truck images are required'));
+  }
+  next();
+});
+
+vehicles.pre('updateOne', function(next) {
+  const update = this.getUpdate();
+  if (update.truckImages && update.truckImages.length < 4) {
+    return next(new Error('At least 4 truck images are required'));
+  }
+  next();
+});
 
 module.exports = mongoose.model("vehicles", vehicles);

@@ -31,6 +31,21 @@ const {
 const { vehicleSchemas } = require("../validations/schemas");
 
 /**
+ * Check if user has a driving license
+ * @param {string} userId - User ID
+ * @returns {Promise<boolean>} - True if user has driving license
+ */
+const userHasDrivingLicense = async (userId) => {
+  try {
+    const user = await users.findById(userId).select('drivingLicense');
+    return user && user.drivingLicense;
+  } catch (error) {
+    console.error('Error checking driving license:', error);
+    return false;
+  }
+};
+
+/**
  * Create a new vehicle
  * @route POST /api/v1/vehicles
  */
@@ -110,10 +125,10 @@ exports.createVehicle = async (req, res) => {
     }
 
     // Validate document and image references
-    const validImageIds = await validateImageReferences(value.truckImages);
+    const validImageIds = await validateImageReferences(value.truckImages, userId);
     const validDocumentIds = await validateDocumentReferences([
       value.registrationCertificate,
-    ]);
+    ], userId);
 
     if (!validImageIds.isValid || !validDocumentIds.isValid) {
       const response = badRequest("Invalid image or document references", {
@@ -121,6 +136,42 @@ exports.createVehicle = async (req, res) => {
         documents: validDocumentIds.errors,
       });
       return res.status(response.statusCode).json(response);
+    }
+
+    // Check if this is the user's first vehicle registration
+    const existingVehicles = await vehicles.find({ user: userId, isActive: true });
+    const isFirstVehicle = existingVehicles.length === 0;
+
+    // Validate drivingLicense based on whether this is the first vehicle
+    if (isFirstVehicle) {
+      // For first vehicle, drivingLicense is required
+      if (!value.drivingLicense) {
+        const response = badRequest("Driving license is required for your first vehicle registration");
+        return res.status(response.statusCode).json(response);
+      }
+
+      // Validate that the drivingLicense document exists and is uploaded by the same user
+      const validDrivingLicense = await validateDocumentReference(value.drivingLicense, userId);
+      if (!validDrivingLicense.isValid) {
+        const response = badRequest("Invalid driving license reference", {
+          drivingLicense: validDrivingLicense.errors,
+        });
+        return res.status(response.statusCode).json(response);
+      }
+
+      // Update user's drivingLicense field
+      await users.findByIdAndUpdate(userId, { drivingLicense: value.drivingLicense });
+    } else {
+      // For subsequent vehicles, drivingLicense is optional
+      if (value.drivingLicense) {
+        const validDrivingLicense = await validateDocumentReference(value.drivingLicense, userId);
+        if (!validDrivingLicense.isValid) {
+          const response = badRequest("Invalid driving license reference", {
+            drivingLicense: validDrivingLicense.errors,
+          });
+          return res.status(response.statusCode).json(response);
+        }
+      }
     }
 
     // Check if terms and conditions are accepted
@@ -138,7 +189,7 @@ exports.createVehicle = async (req, res) => {
       vehicleCapacity: value.vehicleCapacity,
       termsAndConditionsAccepted: value.termsAndConditionsAccepted,
       registrationCertificate: value.registrationCertificate,
-      images: value.truckImages,
+      truckImages: value.truckImages,
       isActive: true,
       isVerified: false,
       isAvailable: true,
@@ -147,6 +198,14 @@ exports.createVehicle = async (req, res) => {
     // Add goodsAccepted only if provided
     if (value.goodsAccepted) {
       vehicleData.goodsAccepted = value.goodsAccepted;
+    }
+
+    // Add drivingLicense to vehicle documents if provided (for subsequent vehicles)
+    if (!isFirstVehicle && value.drivingLicense) {
+      if (!vehicleData.documents) {
+        vehicleData.documents = [];
+      }
+      vehicleData.documents.push(value.drivingLicense);
     }
 
     const newVehicle = await vehicles.create(vehicleData);
@@ -158,7 +217,8 @@ exports.createVehicle = async (req, res) => {
       .populate("vehicleType", "name")
       .populate("vehicleBodyType", "name")
       .populate("registrationCertificate", "url filename")
-      .populate("images", "url filename");
+      .populate("truckImages", "url filename")
+      .populate("documents", "url filename");
 
     const response = created(
       { vehicle: populatedVehicle },
@@ -169,6 +229,53 @@ exports.createVehicle = async (req, res) => {
   } catch (error) {
     console.error("Create vehicle error:", error);
     const response = serverError("Failed to register vehicle");
+    return res.status(response.statusCode).json(response);
+  }
+};
+
+/**
+ * Get user's driving license information
+ * @route GET /api/v1/vehicles/driving-license
+ */
+exports.getUserDrivingLicense = async (req, res) => {
+  try {
+    const userId = req.user.user_id;
+
+    // Check if user exists and is active
+    const user = await users.findById(userId);
+    if (!user || !user.isActive) {
+      const response = unauthorized("User not found or inactive");
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Check if user is a driver
+    const userType = await require("../db/models/user_types").findById(
+      user.user_type
+    );
+    if (userType.name !== "driver") {
+      const response = forbidden("Only drivers can access driving license information");
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Get user with populated driving license
+    const userWithLicense = await users
+      .findById(userId)
+      .populate("drivingLicense", "url filename uploadedAt");
+
+    const hasDrivingLicense = !!userWithLicense.drivingLicense;
+
+    const response = success(
+      {
+        hasDrivingLicense,
+        drivingLicense: hasDrivingLicense ? userWithLicense.drivingLicense : null,
+      },
+      "Driving license information retrieved successfully"
+    );
+
+    return res.status(response.statusCode).json(response);
+  } catch (error) {
+    console.error("Get user driving license error:", error);
+    const response = serverError("Failed to retrieve driving license information");
     return res.status(response.statusCode).json(response);
   }
 };
@@ -279,6 +386,7 @@ exports.getAllVehicles = async (req, res) => {
       .populate("vehicleBodyType", "name")
       .populate("registrationCertificate", "url filename")
       .populate("truckImages", "url filename")
+      .populate("documents", "url filename")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -333,7 +441,8 @@ exports.getVehicleById = async (req, res) => {
       .populate("vehicleType", "name")
       .populate("vehicleBodyType", "name")
       .populate("registrationCertificate", "url filename")
-      .populate("truckImages", "url filename");
+      .populate("truckImages", "url filename")
+      .populate("documents", "url filename");
 
     if (!vehicle) {
       const response = notFound("Vehicle not found");
@@ -426,9 +535,39 @@ exports.updateVehicle = async (req, res) => {
       value.vehicleNumber = value.vehicleNumber.toUpperCase();
     }
 
-    // Validate references if being updated
-    if (value.truckImages) {
-      const validImageIds = await validateImageReferences(value.truckImages);
+    // Validate vehicle type and body type if being updated
+    if (value.vehicleType) {
+      const vehicleType = await vehicle_types.findById(value.vehicleType);
+      if (!vehicleType) {
+        const response = badRequest("Invalid vehicle type");
+        return res.status(response.statusCode).json(response);
+      }
+    }
+
+    if (value.vehicleBodyType) {
+      const vehicleBodyType = await vehicle_body_types.findById(
+        value.vehicleBodyType
+      );
+      if (!vehicleBodyType) {
+        const response = badRequest("Invalid vehicle body type");
+        return res.status(response.statusCode).json(response);
+      }
+    }
+
+    // Validate goods accepted type if being updated
+    if (value.goodsAccepted) {
+      const goodsAccepted = require("../db/models/goods_accepted");
+      const goodsAcceptedType = await goodsAccepted.findById(value.goodsAccepted);
+      if (!goodsAcceptedType) {
+        const response = badRequest("Invalid goods accepted type");
+        return res.status(response.statusCode).json(response);
+      }
+    }
+
+    // Validate and process truckImages if being updated
+    if (value.truckImages !== undefined) {
+      // Validate image references
+      const validImageIds = await validateImageReferences(value.truckImages, userId);
       if (!validImageIds.isValid) {
         const response = badRequest(
           "Invalid image references",
@@ -436,12 +575,33 @@ exports.updateVehicle = async (req, res) => {
         );
         return res.status(response.statusCode).json(response);
       }
+
+      // Use helper function for comprehensive validation
+      const currentTruckImages = vehicle.truckImages || [];
+      const validationResult = validateTruckImagesOperation(currentTruckImages, value.truckImages);
+      
+      if (!validationResult.isValid) {
+        const response = badRequest(
+          "Truck images validation failed",
+          validationResult.errors
+        );
+        return res.status(response.statusCode).json(response);
+      }
+
+      // Log operation details for debugging
+      console.log('Truck images operation:', {
+        vehicleId,
+        currentCount: currentTruckImages.length,
+        newCount: value.truckImages.length,
+        toAdd: validationResult.operation.toAdd.length,
+        toRemove: validationResult.operation.toRemove.length
+      });
     }
 
     if (value.registrationCertificate) {
       const validDocumentIds = await validateDocumentReferences([
         value.registrationCertificate,
-      ]);
+      ], userId);
       if (!validDocumentIds.isValid) {
         const response = badRequest(
           "Invalid document references",
@@ -451,28 +611,51 @@ exports.updateVehicle = async (req, res) => {
       }
     }
 
+    // Validate drivingLicense if provided
+    if (value.drivingLicense) {
+      const validDrivingLicense = await validateDocumentReference(value.drivingLicense, userId);
+      if (!validDrivingLicense.isValid) {
+        const response = badRequest("Invalid driving license reference", {
+          drivingLicense: validDrivingLicense.errors,
+        });
+        return res.status(response.statusCode).json(response);
+      }
+
+      // Update user's drivingLicense field
+      await users.findByIdAndUpdate(userId, { drivingLicense: value.drivingLicense });
+    }
+
     // Update vehicle
-    const updatedVehicle = await vehicles
-      .findByIdAndUpdate(
-        vehicleId,
-        {
-          ...value,
-          updatedAt: new Date(),
-        },
-        { new: true }
-      )
-      .populate("user", "name email phone")
-      .populate("vehicleType", "name")
-      .populate("vehicleBodyType", "name")
-      .populate("registrationCertificate", "url filename")
-      .populate("images", "url filename");
+    try {
+      const updatedVehicle = await vehicles
+        .findByIdAndUpdate(
+          vehicleId,
+          {
+            ...value,
+            updatedAt: new Date(),
+          },
+          { new: true }
+        )
+        .populate("user", "name email phone")
+        .populate("vehicleType", "name")
+        .populate("vehicleBodyType", "name")
+        .populate("registrationCertificate", "url filename")
+        .populate("truckImages", "url filename")
+        .populate("documents", "url filename");
 
-    const response = updated(
-      { vehicle: updatedVehicle },
-      "Vehicle updated successfully"
-    );
+      const response = updated(
+        { vehicle: updatedVehicle },
+        "Vehicle updated successfully"
+      );
 
-    return res.status(response.statusCode).json(response);
+      return res.status(response.statusCode).json(response);
+    } catch (error) {
+      if (error.message === 'At least 4 truck images are required') {
+        const response = badRequest("At least 4 truck images are required in the database");
+        return res.status(response.statusCode).json(response);
+      }
+      throw error; // Re-throw other errors to be caught by the outer catch block
+    }
   } catch (error) {
     console.error("Update vehicle error:", error);
     const response = serverError("Failed to update vehicle");
@@ -718,8 +901,62 @@ exports.getVehicleStats = async (req, res) => {
   }
 };
 
+/**
+ * Get vehicle truck images count and details
+ * @route GET /api/v1/vehicles/:vehicleId/truck-images
+ */
+exports.getVehicleTruckImages = async (req, res) => {
+  try {
+    const { vehicleId } = req.params;
+    const userId = req.user.user_id;
+
+    // Check if user exists and is active
+    const user = await users.findById(userId);
+    if (!user || !user.isActive) {
+      const response = unauthorized("User not found or inactive");
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Get vehicle
+    const vehicle = await vehicles.findById(vehicleId)
+      .populate("truckImages", "url filename")
+      .select("truckImages user");
+
+    if (!vehicle) {
+      const response = notFound("Vehicle not found");
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Check access permissions
+    const userType = await require("../db/models/user_types").findById(user.user_type);
+    if (userType.name === "driver" && vehicle.user.toString() !== userId) {
+      const response = forbidden("Access denied");
+      return res.status(response.statusCode).json(response);
+    }
+
+    const truckImagesCount = vehicle.truckImages ? vehicle.truckImages.length : 0;
+    const isMinimumMet = truckImagesCount >= 4;
+
+    const response = success({
+      vehicleId,
+      truckImagesCount,
+      isMinimumMet,
+      minimumRequired: 4,
+      truckImages: vehicle.truckImages || [],
+      canAddMore: true,
+      canRemove: truckImagesCount > 4
+    }, "Vehicle truck images retrieved successfully");
+
+    return res.status(response.statusCode).json(response);
+  } catch (error) {
+    console.error("Get vehicle truck images error:", error);
+    const response = serverError("Failed to retrieve vehicle truck images");
+    return res.status(response.statusCode).json(response);
+  }
+};
+
 // Helper functions
-const validateImageReference = async (imageId) => {
+const validateImageReference = async (imageId, userId) => {
   try {
     if (!Types.ObjectId.isValid(imageId)) {
       return { isValid: false, errors: ["Invalid image ID format"] };
@@ -730,6 +967,11 @@ const validateImageReference = async (imageId) => {
       return { isValid: false, errors: ["Image not found"] };
     }
 
+    // Check if the image was uploaded by the same user
+    if (image.uploadedBy && image.uploadedBy.toString() !== userId) {
+      return { isValid: false, errors: ["Image does not belong to you"] };
+    }
+
     return { isValid: true, errors: [] };
   } catch (error) {
     console.error('Image validation error:', error);
@@ -737,12 +979,12 @@ const validateImageReference = async (imageId) => {
   }
 };
 
-const validateImageReferences = async (imageIds) => {
+const validateImageReferences = async (imageIds, userId) => {
   const errors = [];
 
   for (const imageId of imageIds) {
     if (imageId) {
-      const result = await validateImageReference(imageId);
+      const result = await validateImageReference(imageId, userId);
       if (!result.isValid) {
         errors.push(...result.errors);
       }
@@ -752,7 +994,50 @@ const validateImageReferences = async (imageIds) => {
   return { isValid: errors.length === 0, errors };
 };
 
-const validateDocumentReference = async (documentId) => {
+/**
+ * Helper function to validate truck images operations
+ * @param {Array} currentImages - Current truck images in database
+ * @param {Array} newImages - New truck images array
+ * @returns {Object} Validation result
+ */
+const validateTruckImagesOperation = (currentImages, newImages) => {
+  const errors = [];
+  
+  // Check minimum requirement
+  if (newImages.length < 4) {
+    errors.push(`At least 4 truck images are required. Current count: ${newImages.length}`);
+  }
+  
+  // Check for duplicates
+  const uniqueImages = [...new Set(newImages)];
+  if (uniqueImages.length !== newImages.length) {
+    errors.push("Truck images array contains duplicate image IDs");
+  }
+  
+  // Check if removing too many images
+  const currentImageIds = currentImages.map(img => img.toString());
+  const imagesToRemove = currentImageIds.filter(img => !newImages.includes(img));
+  const imagesToAdd = newImages.filter(img => !currentImageIds.includes(img));
+  
+  if (imagesToRemove.length > 0) {
+    const remainingAfterRemoval = newImages.length;
+    if (remainingAfterRemoval < 4) {
+      errors.push(`Cannot remove ${imagesToRemove.length} images. At least 4 truck images must remain. Current: ${remainingAfterRemoval}`);
+    }
+  }
+  
+  return {
+    isValid: errors.length === 0,
+    errors,
+    operation: {
+      toAdd: imagesToAdd,
+      toRemove: imagesToRemove,
+      totalAfterOperation: newImages.length
+    }
+  };
+};
+
+const validateDocumentReference = async (documentId, userId) => {
   try {
     if (!Types.ObjectId.isValid(documentId)) {
       return { isValid: false, errors: ["Invalid document ID format"] };
@@ -763,6 +1048,11 @@ const validateDocumentReference = async (documentId) => {
       return { isValid: false, errors: ["Document not found"] };
     }
 
+    // Check if the document was uploaded by the same user
+    if (document.uploadedBy && document.uploadedBy.toString() !== userId) {
+      return { isValid: false, errors: ["Document does not belong to you"] };
+    }
+
     return { isValid: true, errors: [] };
   } catch (error) {
     console.error('Document validation error:', error);
@@ -770,12 +1060,12 @@ const validateDocumentReference = async (documentId) => {
   }
 };
 
-const validateDocumentReferences = async (documentIds) => {
+const validateDocumentReferences = async (documentIds, userId) => {
   const errors = [];
 
   for (const documentId of documentIds) {
     if (documentId) {
-      const result = await validateDocumentReference(documentId);
+      const result = await validateDocumentReference(documentId, userId);
       if (!result.isValid) {
         errors.push(...result.errors);
       }

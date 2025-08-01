@@ -67,7 +67,7 @@ exports.createRequest = async (req, res) => {
 
     // Validate attachments if provided
     if (value.attachments && value.attachments.length > 0) {
-      const validAttachments = await validateImageReferences(value.attachments);
+      const validAttachments = await validateImageReferences(value.attachments, userId);
       if (!validAttachments.isValid) {
         const response = badRequest("Invalid attachment references", validAttachments.errors);
         return res.status(response.statusCode).json(response);
@@ -297,7 +297,7 @@ exports.updateRequest = async (req, res) => {
 
     // Validate attachments if being updated
     if (value.attachments && value.attachments.length > 0) {
-      const validAttachments = await validateImageReferences(value.attachments);
+      const validAttachments = await validateImageReferences(value.attachments, userId);
       if (!validAttachments.isValid) {
         const response = badRequest("Invalid attachment references", validAttachments.errors);
         return res.status(response.statusCode).json(response);
@@ -596,7 +596,7 @@ exports.getRequestStats = async (req, res) => {
 };
 
 // Helper function to validate image references
-const validateImageReference = async (imageId) => {
+const validateImageReference = async (imageId, userId) => {
   try {
     if (!Types.ObjectId.isValid(imageId)) {
       return { isValid: false, errors: ["Invalid image ID format"] };
@@ -607,18 +607,23 @@ const validateImageReference = async (imageId) => {
       return { isValid: false, errors: ["Image not found"] };
     }
 
+    // Check if the image was uploaded by the same user
+    if (image.uploadedBy && image.uploadedBy.toString() !== userId) {
+      return { isValid: false, errors: ["Image does not belong to you"] };
+    }
+
     return { isValid: true, errors: [] };
   } catch (error) {
     return { isValid: false, errors: ["Image validation failed"] };
   }
 };
 
-const validateImageReferences = async (imageIds) => {
+const validateImageReferences = async (imageIds, userId) => {
   const errors = [];
-  
+
   for (const imageId of imageIds) {
     if (imageId) {
-      const result = await validateImageReference(imageId);
+      const result = await validateImageReference(imageId, userId);
       if (!result.isValid) {
         errors.push(...result.errors);
       }

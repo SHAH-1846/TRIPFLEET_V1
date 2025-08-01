@@ -109,14 +109,15 @@ exports.registerDriver = async (req, res) => {
     }
 
     // Validate document and image references
+    // Note: For registration, we'll validate that files exist but not ownership since user doesn't exist yet
     const validImageIds = await validateImageReferences([
       value.profilePicture,
       ...value.truckImages,
-    ]);
+    ], null); // null for registration since user doesn't exist yet
     const validDocumentIds = await validateDocumentReferences([
       value.drivingLicense,
       value.registrationCertificate,
-    ]);
+    ], null); // null for registration since user doesn't exist yet
 
     if (!validImageIds.isValid || !validDocumentIds.isValid) {
       const response = badRequest("Invalid image or document references", {
@@ -812,7 +813,7 @@ exports.deleteUser = async (req, res) => {
 };
 
 // Helper functions
-const validateImageReference = async (imageId) => {
+const validateImageReference = async (imageId, userId = null) => {
   try {
     if (!Types.ObjectId.isValid(imageId)) {
       return { isValid: false, errors: ["Invalid image ID format"] };
@@ -823,18 +824,23 @@ const validateImageReference = async (imageId) => {
       return { isValid: false, errors: ["Image not found"] };
     }
 
+    // Check ownership only if userId is provided (not for registration)
+    if (userId && image.uploadedBy && image.uploadedBy.toString() !== userId) {
+      return { isValid: false, errors: ["Image does not belong to you"] };
+    }
+
     return { isValid: true, errors: [] };
   } catch (error) {
     return { isValid: false, errors: ["Image validation failed"] };
   }
 };
 
-const validateImageReferences = async (imageIds) => {
+const validateImageReferences = async (imageIds, userId = null) => {
   const errors = [];
 
   for (const imageId of imageIds) {
     if (imageId) {
-      const result = await validateImageReference(imageId);
+      const result = await validateImageReference(imageId, userId);
       if (!result.isValid) {
         errors.push(...result.errors);
       }
@@ -844,15 +850,20 @@ const validateImageReferences = async (imageIds) => {
   return { isValid: errors.length === 0, errors };
 };
 
-const validateDocumentReference = async (documentId) => {
+const validateDocumentReference = async (documentId, userId = null) => {
   try {
     if (!Types.ObjectId.isValid(documentId)) {
       return { isValid: false, errors: ["Invalid document ID format"] };
     }
-
+    
     const document = await Documents.findById(documentId);
     if (!document) {
       return { isValid: false, errors: ["Document not found"] };
+    }
+
+    // Check ownership only if userId is provided (not for registration)
+    if (userId && document.uploadedBy && document.uploadedBy.toString() !== userId) {
+      return { isValid: false, errors: ["Document does not belong to you"] };
     }
 
     return { isValid: true, errors: [] };
@@ -861,12 +872,12 @@ const validateDocumentReference = async (documentId) => {
   }
 };
 
-const validateDocumentReferences = async (documentIds) => {
+const validateDocumentReferences = async (documentIds, userId = null) => {
   const errors = [];
 
   for (const documentId of documentIds) {
     if (documentId) {
-      const result = await validateDocumentReference(documentId);
+      const result = await validateDocumentReference(documentId, userId);
       if (!result.isValid) {
         errors.push(...result.errors);
       }

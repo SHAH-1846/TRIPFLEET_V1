@@ -37,7 +37,7 @@ function cleanupUploads() {
 
         // const isUsed = await Promise.any([
         //   User.exists({ profilePicture: imageId }),
-        //   Vehicle.exists({ images: imageId }),
+        //   Vehicle.exists({ truckImages: imageId }),
         //   CustomerRequest.exists({ images: imageId }),
         // ]).catch(() => false);
 
@@ -46,7 +46,7 @@ function cleanupUploads() {
         const isUsedInUser = await User.exists({
           profilePicture: imageObjectId,
         });
-        const isUsedInVehicle = await Vehicle.exists({ images: imageObjectId });
+        const isUsedInVehicle = await Vehicle.exists({ truckImages: imageObjectId });
         const isUsedInRequest = await CustomerRequest.exists({
           images: imageObjectId,
         });

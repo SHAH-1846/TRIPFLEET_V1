@@ -171,6 +171,7 @@ const vehicleSchemas = {
       'array.min': 'At least 4 truck images are required',
       'array.base': 'Truck images must be an array'
     }),
+    drivingLicense: fields.objectId.optional(),
   }),
 
   updateVehicle: Joi.object({
@@ -180,11 +181,11 @@ const vehicleSchemas = {
     vehicleCapacity: Joi.number().min(1).max(100).optional(),
     goodsAccepted: fields.objectId.optional(),
     registrationCertificate: fields.objectId.optional(),
-    truckImages: Joi.array().items(fields.objectId).min(1).unique().optional().messages({
+    truckImages: Joi.array().items(fields.objectId).unique().optional().messages({
       'array.unique': 'Truck images must contain unique image IDs',
-      'array.min': 'At least 1 truck image is required',
       'array.base': 'Truck images must be an array'
     }),
+    drivingLicense: fields.objectId.optional(),
   }).min(1),
 };
 
