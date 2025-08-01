@@ -36,6 +36,7 @@ passport.use(
             googleId: profile.id,
             email: profile.emails[0].value,
             password,
+            isActive: true,
           });
         } else {
           if (!user.googleId) {

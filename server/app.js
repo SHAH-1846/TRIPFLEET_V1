@@ -141,6 +141,8 @@ app.get("/", (req, res) => {
 
 // Static file serving
 app.use("/uploads", express.static(path.join(__dirname, "uploads")));
+app.use("/assets", express.static(path.join(__dirname, "assets")));
+
 
 // API Routes with versioning
 const apiV1 = express.Router();

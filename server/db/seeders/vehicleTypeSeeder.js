@@ -8,21 +8,45 @@ const MONGO_URI = process.env.MONGODB_URI;
 const vehicleTypes = [
   {
     _id: '684aa71cb88048daeaebff8a',
-    name: 'Bike',
+    name: 'Small Truck',
     description: 'Two-wheeler suitable for light parcel delivery',
     status: 'active',
+    icon: '/assets/vehicleTypes/SmallTruck.png',
   },
   {
     _id: '684aa728b88048daeaebff8b',
-    name: 'Car',
+    name: 'Medium Truck',
     description: 'Four-wheeler for medium-sized deliveries or ride-sharing',
     status: 'active',
+    icon: '/assets/vehicleTypes/MediumTruck.png',
   },
   {
     _id: '684aa733b88048daeaebff8c',
-    name: 'Truck',
+    name: 'Large Truck',
     description: 'Heavy-duty transport vehicle for goods and cargo',
     status: 'active',
+    icon: '/assets/vehicleTypes/LargeTruck.png',
+  },
+  {
+    _id: '684aa733b88048daeaebff8d',
+    name: 'Container Truck',
+    description: 'Heavy-duty transport vehicle for goods and cargo',
+    status: 'active',
+    icon: '/assets/vehicleTypes/ContainerTruck.png',
+  },
+  {
+    _id: '684aa733b88048daeaebff8e',
+    name: 'Trailer',
+    description: 'Heavy-duty transport vehicle for goods and cargo',
+    status: 'active',
+    icon: '/assets/vehicleTypes/Trailer.png',
+  },
+  {
+    _id: '684aa733b88048daeaebff8f',
+    name: 'Mini Truck',
+    description: 'Heavy-duty transport vehicle for goods and cargo',
+    status: 'active',
+    icon: '/assets/vehicleTypes/MiniTruck.png',
   },
 ];
 

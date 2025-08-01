@@ -47,6 +47,18 @@ const users = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    isPhoneVerified: {
+      type: Boolean,
+      default: false,
+    },
+    isEmailVerified: {
+      type: Boolean,
+      default: false,
+    },
+    lastLogin: {
+      type: Date,
+      default: null,
+    },
     user_type: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "user_types",
@@ -63,6 +75,10 @@ const users = new mongoose.Schema(
     ],
     termsAndConditionsAccepted: { type: Boolean, default: false },
     privacyPolicyAccepted: { type: Boolean, default: false },
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
   },
   {
     timestamps: true,

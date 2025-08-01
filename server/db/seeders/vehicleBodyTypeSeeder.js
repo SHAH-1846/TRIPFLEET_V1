@@ -8,19 +8,31 @@ const MONGO_URI = process.env.MONGODB_URI;
 const vehicleBodyTypes = [
   {
     _id: '685ea11cf883dfb6dcf0b900',
-    name: 'Open Body',
+    name: 'Open',
     description: 'Suitable for transporting large or oversized items with no roof.',
     status: 'active',
   },
   {
     _id: '685ea13cf883dfb6dcf0b901',
-    name: 'Closed Body',
+    name: 'Closed',
     description: 'Enclosed body for weather-sensitive goods.',
     status: 'active',
   },
   {
     _id: '685ea14df883dfb6dcf0b902',
     name: 'Container',
+    description: 'Used for long-distance transport of sealed containerized cargo.',
+    status: 'active',
+  },
+  {
+    _id: '685ea14df883dfb6dcf0b903',
+    name: 'Flatbed',
+    description: 'Used for long-distance transport of sealed containerized cargo.',
+    status: 'active',
+  },
+  {
+    _id: '685ea14df883dfb6dcf0b904',
+    name: 'Tipper',
     description: 'Used for long-distance transport of sealed containerized cargo.',
     status: 'active',
   },

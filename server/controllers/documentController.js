@@ -42,6 +42,7 @@ exports.uploadDocument = async (req, res) => {
 
     if (tokenType === "phone_verified_login") {
       // Registered user: must exist and be active
+      console.log("userId", userId);
       user = await require("../db/models/users").findById(userId);
       if (!user || !user.isActive) {
         if (req.file && req.file.path && fs.existsSync(req.file.path)) {

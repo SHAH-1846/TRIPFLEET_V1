@@ -11,7 +11,7 @@ const vehicles = new mongoose.Schema(
     vehicleNumber: {
       type: String,
       required: true,
-      unique: true,
+      // unique: true,
       trim: true,
     },
 
@@ -28,7 +28,14 @@ const vehicles = new mongoose.Schema(
     },
 
     goodsAccepted: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "goods_accepted",
+      // required: true,
+    },
+
+    termsAndConditionsAccepted: {
       type: Boolean,
+      required: true,
       default: true,
     },
 
@@ -63,6 +70,21 @@ const vehicles = new mongoose.Schema(
         ref: "documents",
       },
     ],
+
+    isActive: {
+      type: Boolean,
+      default: true,
+    },
+
+    isVerified: {
+      type: Boolean,
+      default: false,
+    },
+
+    isAvailable: {
+      type: Boolean,
+      default: true,
+    },
   },
   {
     timestamps: true,

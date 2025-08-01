@@ -14,17 +14,17 @@ const images = require("../db/models/images");
 const Documents = require("../db/models/documents");
 
 // Utils
-const { 
-  success, 
-  created, 
-  updated, 
-  deleted, 
-  badRequest, 
-  unauthorized, 
-  forbidden, 
-  notFound, 
-  conflict, 
-  serverError 
+const {
+  success,
+  created,
+  updated,
+  deleted,
+  badRequest,
+  unauthorized,
+  forbidden,
+  notFound,
+  conflict,
+  serverError,
 } = require("../utils/response-handler");
 
 // Validation schemas
@@ -39,17 +39,17 @@ exports.createVehicle = async (req, res) => {
     const userId = req.user.user_id;
 
     // Validate request data
-    const { error, value } = vehicleSchemas.createVehicle.validate(req.body, { 
-      abortEarly: false, 
-      stripUnknown: true 
+    const { error, value } = vehicleSchemas.createVehicle.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true,
     });
 
     if (error) {
-      const errors = error.details.map(detail => ({
-        field: detail.path.join('.'),
-        message: detail.message
+      const errors = error.details.map((detail) => ({
+        field: detail.path.join("."),
+        message: detail.message,
       }));
-      
+
       const response = badRequest("Validation failed", errors);
       return res.status(response.statusCode).json(response);
     }
@@ -62,40 +62,27 @@ exports.createVehicle = async (req, res) => {
     }
 
     // Check if user is a driver
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name !== 'driver') {
+    const userType = await require("../db/models/user_types").findById(
+      user.user_type
+    );
+    if (userType.name !== "driver") {
       const response = forbidden("Only drivers can register vehicles");
       return res.status(response.statusCode).json(response);
     }
 
-    // Check if user already has a vehicle
-    const existingVehicle = await vehicles.findOne({ user: userId, isActive: true });
-    if (existingVehicle) {
-      const response = conflict("Driver already has a registered vehicle");
-      return res.status(response.statusCode).json(response);
-    }
-
-    // Check if vehicle number already exists
-    const vehicleNumberExists = await vehicles.findOne({ 
+    // Check if vehicle number already exists (unique across all vehicles)
+    // Drivers can register multiple vehicles, but vehicle numbers must be unique
+    const vehicleNumberExists = await vehicles.findOne({
       vehicleNumber: value.vehicleNumber.toUpperCase(),
-      isActive: true
+      isActive: true,
     });
+    console.log("vehicleNumberExists : ", vehicleNumberExists);
     if (vehicleNumberExists) {
       const response = conflict("Vehicle number already registered");
       return res.status(response.statusCode).json(response);
     }
 
-    // Validate document and image references
-    const validImageIds = await validateImageReferences(value.truckImages);
-    const validDocumentIds = await validateDocumentReferences([value.registrationCertificate]);
 
-    if (!validImageIds.isValid || !validDocumentIds.isValid) {
-      const response = badRequest("Invalid image or document references", {
-        images: validImageIds.errors,
-        documents: validDocumentIds.errors
-      });
-      return res.status(response.statusCode).json(response);
-    }
 
     // Validate vehicle type and body type
     const vehicleType = await vehicle_types.findById(value.vehicleType);
@@ -104,9 +91,41 @@ exports.createVehicle = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
-    const vehicleBodyType = await vehicle_body_types.findById(value.vehicleBodyType);
+    const vehicleBodyType = await vehicle_body_types.findById(
+      value.vehicleBodyType
+    );
     if (!vehicleBodyType) {
       const response = badRequest("Invalid vehicle body type");
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Validate goods accepted type (if provided)
+    if (value.goodsAccepted) {
+      const goodsAccepted = require("../db/models/goods_accepted");
+      const goodsAcceptedType = await goodsAccepted.findById(value.goodsAccepted);
+      if (!goodsAcceptedType) {
+        const response = badRequest("Invalid goods accepted type");
+        return res.status(response.statusCode).json(response);
+      }
+    }
+
+    // Validate document and image references
+    const validImageIds = await validateImageReferences(value.truckImages);
+    const validDocumentIds = await validateDocumentReferences([
+      value.registrationCertificate,
+    ]);
+
+    if (!validImageIds.isValid || !validDocumentIds.isValid) {
+      const response = badRequest("Invalid image or document references", {
+        images: validImageIds.errors,
+        documents: validDocumentIds.errors,
+      });
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Check if terms and conditions are accepted
+    if (!value.termsAndConditionsAccepted) {
+      const response = badRequest("You must accept the terms and conditions to register a vehicle");
       return res.status(response.statusCode).json(response);
     }
 
@@ -117,23 +136,29 @@ exports.createVehicle = async (req, res) => {
       vehicleType: value.vehicleType,
       vehicleBodyType: value.vehicleBodyType,
       vehicleCapacity: value.vehicleCapacity,
-      goodsAccepted: value.goodsAccepted,
+      termsAndConditionsAccepted: value.termsAndConditionsAccepted,
       registrationCertificate: value.registrationCertificate,
-      truckImages: value.truckImages,
+      images: value.truckImages,
       isActive: true,
       isVerified: false,
-      isAvailable: true
+      isAvailable: true,
     };
+
+    // Add goodsAccepted only if provided
+    if (value.goodsAccepted) {
+      vehicleData.goodsAccepted = value.goodsAccepted;
+    }
 
     const newVehicle = await vehicles.create(vehicleData);
 
     // Populate vehicle data for response
-    const populatedVehicle = await vehicles.findById(newVehicle._id)
-      .populate('user', 'name email phone')
-      .populate('vehicleType', 'name')
-      .populate('vehicleBodyType', 'name')
-      .populate('registrationCertificate', 'url filename')
-      .populate('truckImages', 'url filename');
+    const populatedVehicle = await vehicles
+      .findById(newVehicle._id)
+      .populate("user", "name email phone")
+      .populate("vehicleType", "name")
+      .populate("vehicleBodyType", "name")
+      .populate("registrationCertificate", "url filename")
+      .populate("images", "url filename");
 
     const response = created(
       { vehicle: populatedVehicle },
@@ -141,10 +166,64 @@ exports.createVehicle = async (req, res) => {
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Create vehicle error:", error);
     const response = serverError("Failed to register vehicle");
+    return res.status(response.statusCode).json(response);
+  }
+};
+
+/**
+ * Get all vehicle types
+ * @route GET /api/v1/vehicles/types
+ */
+exports.getAllVehicleTypes = async (req, res) => {
+  try {
+    const types = await vehicle_types
+      .find({ status: "active" })
+      .select("name description icon status");
+    const response = success(types, "Vehicle types retrieved successfully");
+    return res.status(response.statusCode).json(response);
+  } catch (error) {
+    console.error("Get all vehicle types error:", error);
+    const response = serverError("Failed to retrieve vehicle types");
+    return res.status(response.statusCode).json(response);
+  }
+};
+
+/**
+ * Get all goods accepted types
+ * @route GET /api/v1/vehicles/goods-accepted
+ */
+exports.getAllGoodsAccepted = async (req, res) => {
+  try {
+    const goodsAccepted = require("../db/models/goods_accepted");
+    const types = await goodsAccepted
+      .find({ status: "active" })
+      .select("name description status");
+    const response = success(types, "Goods accepted types retrieved successfully");
+    return res.status(response.statusCode).json(response);
+  } catch (error) {
+    console.error("Get all goods accepted error:", error);
+    const response = serverError("Failed to retrieve goods accepted types");
+    return res.status(response.statusCode).json(response);
+  }
+};
+
+/**
+ * Get all vehicle body types
+ * @route GET /api/v1/vehicles/body-types
+ */
+exports.getAllVehicleBodyTypes = async (req, res) => {
+  try {
+    const types = await vehicle_body_types
+      .find({ status: "active" })
+      .select("name description status");
+    const response = success(types, "Vehicle body types retrieved successfully");
+    return res.status(response.statusCode).json(response);
+  } catch (error) {
+    console.error("Get all vehicle body types error:", error);
+    const response = serverError("Failed to retrieve vehicle body types");
     return res.status(response.statusCode).json(response);
   }
 };
@@ -155,42 +234,51 @@ exports.createVehicle = async (req, res) => {
  */
 exports.getAllVehicles = async (req, res) => {
   try {
-    const { page = 1, limit = 10, vehicleType, bodyType, status, available, search } = req.query;
+    const {
+      page = 1,
+      limit = 10,
+      vehicleType,
+      bodyType,
+      status,
+      available,
+      search,
+    } = req.query;
     const skip = (page - 1) * limit;
 
     // Build filter object
     const filter = { isActive: true };
-    
+
     if (vehicleType) {
       filter.vehicleType = vehicleType;
     }
-    
+
     if (bodyType) {
       filter.vehicleBodyType = bodyType;
     }
-    
+
     if (status) {
-      filter.isVerified = status === 'verified';
+      filter.isVerified = status === "verified";
     }
-    
+
     if (available !== undefined) {
-      filter.isAvailable = available === 'true';
+      filter.isAvailable = available === "true";
     }
-    
+
     if (search) {
       filter.$or = [
-        { vehicleNumber: { $regex: search, $options: 'i' } },
-        { 'user.name': { $regex: search, $options: 'i' } }
+        { vehicleNumber: { $regex: search, $options: "i" } },
+        { "user.name": { $regex: search, $options: "i" } },
       ];
     }
 
     // Get vehicles with pagination
-    const vehiclesData = await vehicles.find(filter)
-      .populate('user', 'name email phone')
-      .populate('vehicleType', 'name')
-      .populate('vehicleBodyType', 'name')
-      .populate('registrationCertificate', 'url filename')
-      .populate('truckImages', 'url filename')
+    const vehiclesData = await vehicles
+      .find(filter)
+      .populate("user", "name email phone")
+      .populate("vehicleType", "name")
+      .populate("vehicleBodyType", "name")
+      .populate("registrationCertificate", "url filename")
+      .populate("truckImages", "url filename")
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -209,13 +297,12 @@ exports.getAllVehicles = async (req, res) => {
           total,
           totalPages: Math.ceil(total / limit),
           hasNext: page < Math.ceil(total / limit),
-          hasPrev: page > 1
-        }
+          hasPrev: page > 1,
+        },
       }
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Get all vehicles error:", error);
     const response = serverError("Failed to retrieve vehicles");
@@ -240,12 +327,13 @@ exports.getVehicleById = async (req, res) => {
     }
 
     // Get vehicle with populated data
-    const vehicle = await vehicles.findById(vehicleId)
-      .populate('user', 'name email phone')
-      .populate('vehicleType', 'name')
-      .populate('vehicleBodyType', 'name')
-      .populate('registrationCertificate', 'url filename')
-      .populate('truckImages', 'url filename');
+    const vehicle = await vehicles
+      .findById(vehicleId)
+      .populate("user", "name email phone")
+      .populate("vehicleType", "name")
+      .populate("vehicleBodyType", "name")
+      .populate("registrationCertificate", "url filename")
+      .populate("truckImages", "url filename");
 
     if (!vehicle) {
       const response = notFound("Vehicle not found");
@@ -253,19 +341,17 @@ exports.getVehicleById = async (req, res) => {
     }
 
     // Check access permissions
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'driver' && vehicle.user._id.toString() !== userId) {
+    const userType = await require("../db/models/user_types").findById(
+      user.user_type
+    );
+    if (userType.name === "driver" && vehicle.user._id.toString() !== userId) {
       const response = forbidden("Access denied");
       return res.status(response.statusCode).json(response);
     }
 
-    const response = success(
-      { vehicle },
-      "Vehicle retrieved successfully"
-    );
+    const response = success({ vehicle }, "Vehicle retrieved successfully");
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Get vehicle by ID error:", error);
     const response = serverError("Failed to retrieve vehicle");
@@ -283,17 +369,17 @@ exports.updateVehicle = async (req, res) => {
     const userId = req.user.user_id;
 
     // Validate request data
-    const { error, value } = vehicleSchemas.updateVehicle.validate(req.body, { 
-      abortEarly: false, 
-      stripUnknown: true 
+    const { error, value } = vehicleSchemas.updateVehicle.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true,
     });
 
     if (error) {
-      const errors = error.details.map(detail => ({
-        field: detail.path.join('.'),
-        message: detail.message
+      const errors = error.details.map((detail) => ({
+        field: detail.path.join("."),
+        message: detail.message,
       }));
-      
+
       const response = badRequest("Validation failed", errors);
       return res.status(response.statusCode).json(response);
     }
@@ -313,25 +399,30 @@ exports.updateVehicle = async (req, res) => {
     }
 
     // Check if user can update this vehicle
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'driver' && vehicle.user.toString() !== userId) {
+    const userType = await require("../db/models/user_types").findById(
+      user.user_type
+    );
+    if (userType.name === "driver" && vehicle.user.toString() !== userId) {
       const response = forbidden("Access denied");
       return res.status(response.statusCode).json(response);
     }
 
     // Check if vehicle number is being changed and if it's already taken
-    if (value.vehicleNumber && value.vehicleNumber.toUpperCase() !== vehicle.vehicleNumber) {
-      const vehicleNumberExists = await vehicles.findOne({ 
+    if (
+      value.vehicleNumber &&
+      value.vehicleNumber.toUpperCase() !== vehicle.vehicleNumber
+    ) {
+      const vehicleNumberExists = await vehicles.findOne({
         vehicleNumber: value.vehicleNumber.toUpperCase(),
         isActive: true,
-        _id: { $ne: vehicleId }
+        _id: { $ne: vehicleId },
       });
-      
+
       if (vehicleNumberExists) {
         const response = conflict("Vehicle number already registered");
         return res.status(response.statusCode).json(response);
       }
-      
+
       value.vehicleNumber = value.vehicleNumber.toUpperCase();
     }
 
@@ -339,33 +430,42 @@ exports.updateVehicle = async (req, res) => {
     if (value.truckImages) {
       const validImageIds = await validateImageReferences(value.truckImages);
       if (!validImageIds.isValid) {
-        const response = badRequest("Invalid image references", validImageIds.errors);
+        const response = badRequest(
+          "Invalid image references",
+          validImageIds.errors
+        );
         return res.status(response.statusCode).json(response);
       }
     }
 
     if (value.registrationCertificate) {
-      const validDocumentIds = await validateDocumentReferences([value.registrationCertificate]);
+      const validDocumentIds = await validateDocumentReferences([
+        value.registrationCertificate,
+      ]);
       if (!validDocumentIds.isValid) {
-        const response = badRequest("Invalid document references", validDocumentIds.errors);
+        const response = badRequest(
+          "Invalid document references",
+          validDocumentIds.errors
+        );
         return res.status(response.statusCode).json(response);
       }
     }
 
     // Update vehicle
-    const updatedVehicle = await vehicles.findByIdAndUpdate(
-      vehicleId,
-      { 
-        ...value,
-        updatedAt: new Date()
-      },
-      { new: true }
-    )
-    .populate('user', 'name email phone')
-    .populate('vehicleType', 'name')
-    .populate('vehicleBodyType', 'name')
-    .populate('registrationCertificate', 'url filename')
-    .populate('truckImages', 'url filename');
+    const updatedVehicle = await vehicles
+      .findByIdAndUpdate(
+        vehicleId,
+        {
+          ...value,
+          updatedAt: new Date(),
+        },
+        { new: true }
+      )
+      .populate("user", "name email phone")
+      .populate("vehicleType", "name")
+      .populate("vehicleBodyType", "name")
+      .populate("registrationCertificate", "url filename")
+      .populate("images", "url filename");
 
     const response = updated(
       { vehicle: updatedVehicle },
@@ -373,7 +473,6 @@ exports.updateVehicle = async (req, res) => {
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Update vehicle error:", error);
     const response = serverError("Failed to update vehicle");
@@ -406,24 +505,27 @@ exports.updateVehicleAvailability = async (req, res) => {
     }
 
     // Check if user can update this vehicle
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'driver' && vehicle.user.toString() !== userId) {
+    const userType = await require("../db/models/user_types").findById(
+      user.user_type
+    );
+    if (userType.name === "driver" && vehicle.user.toString() !== userId) {
       const response = forbidden("Access denied");
       return res.status(response.statusCode).json(response);
     }
 
     // Update availability
-    const updatedVehicle = await vehicles.findByIdAndUpdate(
-      vehicleId,
-      { 
-        isAvailable: isAvailable,
-        updatedAt: new Date()
-      },
-      { new: true }
-    )
-    .populate('user', 'name email phone')
-    .populate('vehicleType', 'name')
-    .populate('vehicleBodyType', 'name');
+    const updatedVehicle = await vehicles
+      .findByIdAndUpdate(
+        vehicleId,
+        {
+          isAvailable: isAvailable,
+          updatedAt: new Date(),
+        },
+        { new: true }
+      )
+      .populate("user", "name email phone")
+      .populate("vehicleType", "name")
+      .populate("vehicleBodyType", "name");
 
     const response = updated(
       { vehicle: updatedVehicle },
@@ -431,7 +533,6 @@ exports.updateVehicleAvailability = async (req, res) => {
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Update vehicle availability error:", error);
     const response = serverError("Failed to update vehicle availability");
@@ -457,8 +558,10 @@ exports.verifyVehicle = async (req, res) => {
     }
 
     // Check if user is admin
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name !== 'admin') {
+    const userType = await require("../db/models/user_types").findById(
+      user.user_type
+    );
+    if (userType.name !== "admin") {
       const response = forbidden("Only admins can verify vehicles");
       return res.status(response.statusCode).json(response);
     }
@@ -471,20 +574,21 @@ exports.verifyVehicle = async (req, res) => {
     }
 
     // Update verification status
-    const updatedVehicle = await vehicles.findByIdAndUpdate(
-      vehicleId,
-      { 
-        isVerified: isVerified,
-        verificationNotes: verificationNotes,
-        verifiedAt: new Date(),
-        verifiedBy: userId,
-        updatedAt: new Date()
-      },
-      { new: true }
-    )
-    .populate('user', 'name email phone')
-    .populate('vehicleType', 'name')
-    .populate('vehicleBodyType', 'name');
+    const updatedVehicle = await vehicles
+      .findByIdAndUpdate(
+        vehicleId,
+        {
+          isVerified: isVerified,
+          verificationNotes: verificationNotes,
+          verifiedAt: new Date(),
+          verifiedBy: userId,
+          updatedAt: new Date(),
+        },
+        { new: true }
+      )
+      .populate("user", "name email phone")
+      .populate("vehicleType", "name")
+      .populate("vehicleBodyType", "name");
 
     const response = updated(
       { vehicle: updatedVehicle },
@@ -492,7 +596,6 @@ exports.verifyVehicle = async (req, res) => {
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Verify vehicle error:", error);
     const response = serverError("Failed to verify vehicle");
@@ -524,16 +627,18 @@ exports.deleteVehicle = async (req, res) => {
     }
 
     // Check if user can delete this vehicle
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'driver' && vehicle.user.toString() !== userId) {
+    const userType = await require("../db/models/user_types").findById(
+      user.user_type
+    );
+    if (userType.name === "driver" && vehicle.user.toString() !== userId) {
       const response = forbidden("Access denied");
       return res.status(response.statusCode).json(response);
     }
 
     // Check if vehicle has active bookings
-    const activeBookings = await require("../db/models/bookings").find({ 
-      vehicle: vehicleId, 
-      status: { $in: ['confirmed', 'in_progress'] } 
+    const activeBookings = await require("../db/models/bookings").find({
+      vehicle: vehicleId,
+      status: { $in: ["confirmed", "in_progress"] },
     });
 
     if (activeBookings.length > 0) {
@@ -546,12 +651,11 @@ exports.deleteVehicle = async (req, res) => {
       isActive: false,
       deletedAt: new Date(),
       deletedBy: userId,
-      updatedAt: new Date()
+      updatedAt: new Date(),
     });
 
     const response = deleted("Vehicle deleted successfully");
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Delete vehicle error:", error);
     const response = serverError("Failed to delete vehicle");
@@ -576,9 +680,11 @@ exports.getVehicleStats = async (req, res) => {
 
     // Build filter based on user role
     const filter = { isActive: true };
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    
-    if (userType.name === 'driver') {
+    const userType = await require("../db/models/user_types").findById(
+      user.user_type
+    );
+
+    if (userType.name === "driver") {
       filter.user = userId;
     }
     // Admin can see all stats
@@ -590,13 +696,13 @@ exports.getVehicleStats = async (req, res) => {
         $group: {
           _id: null,
           total: { $sum: 1 },
-          verified: { $sum: { $cond: ['$isVerified', 1, 0] } },
-          unverified: { $sum: { $cond: ['$isVerified', 0, 1] } },
-          available: { $sum: { $cond: ['$isAvailable', 1, 0] } },
-          unavailable: { $sum: { $cond: ['$isAvailable', 0, 1] } },
-          avgCapacity: { $avg: '$vehicleCapacity' }
-        }
-      }
+          verified: { $sum: { $cond: ["$isVerified", 1, 0] } },
+          unverified: { $sum: { $cond: ["$isVerified", 0, 1] } },
+          available: { $sum: { $cond: ["$isAvailable", 1, 0] } },
+          unavailable: { $sum: { $cond: ["$isAvailable", 0, 1] } },
+          avgCapacity: { $avg: "$vehicleCapacity" },
+        },
+      },
     ]);
 
     const response = success(
@@ -605,7 +711,6 @@ exports.getVehicleStats = async (req, res) => {
     );
 
     return res.status(response.statusCode).json(response);
-
   } catch (error) {
     console.error("Get vehicle stats error:", error);
     const response = serverError("Failed to retrieve vehicle statistics");
@@ -627,13 +732,14 @@ const validateImageReference = async (imageId) => {
 
     return { isValid: true, errors: [] };
   } catch (error) {
+    console.error('Image validation error:', error);
     return { isValid: false, errors: ["Image validation failed"] };
   }
 };
 
 const validateImageReferences = async (imageIds) => {
   const errors = [];
-  
+
   for (const imageId of imageIds) {
     if (imageId) {
       const result = await validateImageReference(imageId);
@@ -659,13 +765,14 @@ const validateDocumentReference = async (documentId) => {
 
     return { isValid: true, errors: [] };
   } catch (error) {
+    console.error('Document validation error:', error);
     return { isValid: false, errors: ["Document validation failed"] };
   }
 };
 
 const validateDocumentReferences = async (documentIds) => {
   const errors = [];
-  
+
   for (const documentId of documentIds) {
     if (documentId) {
       const result = await validateDocumentReference(documentId);
