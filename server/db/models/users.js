@@ -16,6 +16,8 @@ const users = new mongoose.Schema(
       type: String,
       required: true,
       trim: true,
+      // unique: true,
+      index: true,
     },
     drivingLicense: {
       type: mongoose.Schema.Types.ObjectId,

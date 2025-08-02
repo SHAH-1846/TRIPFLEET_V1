@@ -87,11 +87,12 @@ router.get(
 /**
  * @route GET /api/v1/vehicles
  * @desc Get all vehicles with pagination and filtering
- * @access Private (authenticated users)
+ * @access Private (authenticated users with role-based restrictions)
  */
 router.get(
   "/",
   authenticateToken,
+  requireRole(["admin", "driver", "customer"]),
   pagination,
   vehicleController.getAllVehicles
 );

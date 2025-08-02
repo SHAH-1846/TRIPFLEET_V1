@@ -441,6 +441,81 @@ Authorization: Bearer <access_token>
 
 ---
 
+## Access Control and Security
+
+### Vehicle Data Access Control
+
+The `GET /api/v1/vehicles` endpoint implements role-based access control to protect sensitive vehicle and user data:
+
+#### Access Levels by User Role:
+
+**Admin Users:**
+- Can view all vehicles regardless of status
+- Have access to complete vehicle data including:
+  - Owner contact information (email, phone)
+  - Registration certificates
+  - All vehicle documents
+  - Truck images
+  - Verification status
+
+**Driver Users:**
+- Can view their own vehicles with full data access
+- Can view other verified and available vehicles with limited data:
+  - Vehicle owner name only (no contact details)
+  - Truck images
+  - No access to registration certificates or documents
+- Cannot view unverified or unavailable vehicles from other drivers
+
+**Customer Users:**
+- Can only view verified and available vehicles
+- Limited data access:
+  - Vehicle owner name only (no contact details)
+  - Truck images only
+  - No access to registration certificates or documents
+- Cannot view unverified or unavailable vehicles
+
+#### Security Benefits:
+
+1. **Privacy Protection**: Personal contact information is restricted
+2. **Document Security**: Sensitive documents are only accessible to vehicle owners and admins
+3. **Business Logic**: Customers only see vehicles they can actually book
+4. **Competitive Protection**: Drivers cannot see each other's complete business information
+
+#### Query Parameters:
+
+- `page`: Page number for pagination
+- `limit`: Number of items per page
+- `vehicleType`: Filter by vehicle type
+- `bodyType`: Filter by vehicle body type
+- `status`: Filter by verification status (admin/driver only)
+- `available`: Filter by availability status (admin/driver only)
+- `search`: Search by vehicle number or owner name
+
+## User Profile Security
+
+### WhatsApp Number Uniqueness
+
+The system ensures that WhatsApp numbers are unique across all users to prevent conflicts and maintain data integrity:
+
+#### Security Measures:
+
+1. **Application-Level Validation**: All profile update operations check for WhatsApp number uniqueness
+2. **Database-Level Constraint**: Unique index on `whatsappNumber` field prevents duplicate entries
+3. **Registration Validation**: New user registration validates WhatsApp number uniqueness
+4. **Update Validation**: Profile updates validate WhatsApp number uniqueness before allowing changes
+
+#### Error Handling:
+
+- **409 Conflict**: Returned when attempting to use a WhatsApp number already in use
+- **Validation Errors**: Proper error messages for invalid WhatsApp number formats
+- **Migration Support**: Automatic handling of existing duplicate WhatsApp numbers
+
+#### Protected Operations:
+
+- `PUT /api/v1/users/profile` - Profile updates
+- `POST /api/v1/users/register-driver` - Driver registration
+- `POST /api/v1/users/profile` - Customer registration
+
 ## Booking Management Endpoints
 
 ### 1. Create Booking

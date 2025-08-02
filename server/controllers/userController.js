@@ -502,6 +502,19 @@ exports.updateProfile = async (req, res) => {
       value.isEmailVerified = false; // Reset email verification
     }
 
+    // Check if WhatsApp number is being changed and if it's already taken
+    if (value.whatsappNumber && value.whatsappNumber !== existingUser.whatsappNumber) {
+      const whatsappNumberExists = await users.findOne({
+        whatsappNumber: value.whatsappNumber,
+        _id: { $ne: userId },
+      });
+
+      if (whatsappNumberExists) {
+        const response = conflict("WhatsApp number already in use");
+        return res.status(response.statusCode).json(response);
+      }
+    }
+
     // Validate profile picture if being updated
     if (value.profilePicture) {
       const validImage = await validateImageReference(value.profilePicture);

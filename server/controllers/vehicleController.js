@@ -341,6 +341,9 @@ exports.getAllVehicleBodyTypes = async (req, res) => {
  */
 exports.getAllVehicles = async (req, res) => {
   try {
+    const userId = req.user.user_id;
+    const userRole = req.userRole;
+    
     const {
       page = 1,
       limit = 10,
@@ -355,6 +358,21 @@ exports.getAllVehicles = async (req, res) => {
     // Build filter object
     const filter = { isActive: true };
 
+    // Role-based filtering
+    if (userRole === "customer") {
+      // Customers can only see verified and available vehicles
+      filter.isVerified = true;
+      filter.isAvailable = true;
+    } else if (userRole === "driver") {
+      // Drivers can see all vehicles but with limited data
+      // They can see their own vehicles with full data
+      filter.$or = [
+        { user: userId }, // Own vehicles
+        { isVerified: true, isAvailable: true } // Other verified available vehicles
+      ];
+    }
+    // Admins can see all vehicles (no additional filtering)
+
     if (vehicleType) {
       filter.vehicleType = vehicleType;
     }
@@ -363,11 +381,11 @@ exports.getAllVehicles = async (req, res) => {
       filter.vehicleBodyType = bodyType;
     }
 
-    if (status) {
+    if (status && userRole !== "customer") {
       filter.isVerified = status === "verified";
     }
 
-    if (available !== undefined) {
+    if (available !== undefined && userRole !== "customer") {
       filter.isAvailable = available === "true";
     }
 
@@ -378,24 +396,70 @@ exports.getAllVehicles = async (req, res) => {
       ];
     }
 
+    // Determine what data to populate based on user role
+    let populateOptions = [
+      "vehicleType",
+      "vehicleBodyType"
+    ];
+
+    if (userRole === "admin") {
+      // Admins get full data
+      populateOptions.push(
+        { path: "user", select: "name email phone" },
+        "registrationCertificate",
+        "truckImages",
+        "documents"
+      );
+    } else if (userRole === "driver") {
+      // Drivers get limited data for other vehicles, full data for their own
+      populateOptions.push(
+        { path: "user", select: "name" },
+        "truckImages"
+      );
+    } else if (userRole === "customer") {
+      // Customers get minimal data
+      populateOptions.push(
+        { path: "user", select: "name" },
+        "truckImages"
+      );
+    }
+
     // Get vehicles with pagination
     const vehiclesData = await vehicles
       .find(filter)
-      .populate("user", "name email phone")
-      .populate("vehicleType", "name")
-      .populate("vehicleBodyType", "name")
-      .populate("registrationCertificate", "url filename")
-      .populate("truckImages", "url filename")
-      .populate("documents", "url filename")
+      .populate(populateOptions)
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
+
+    // Apply additional data filtering based on role
+    const filteredVehiclesData = vehiclesData.map(vehicle => {
+      const vehicleObj = vehicle.toObject();
+      
+      if (userRole === "driver") {
+        // If it's not the driver's own vehicle, limit sensitive data
+        if (vehicle.user._id.toString() !== userId) {
+          delete vehicleObj.registrationCertificate;
+          delete vehicleObj.documents;
+          delete vehicleObj.user.email;
+          delete vehicleObj.user.phone;
+        }
+      } else if (userRole === "customer") {
+        // Customers get minimal data
+        delete vehicleObj.registrationCertificate;
+        delete vehicleObj.documents;
+        delete vehicleObj.user.email;
+        delete vehicleObj.user.phone;
+      }
+      
+      return vehicleObj;
+    });
 
     // Get total count
     const total = await vehicles.countDocuments(filter);
 
     const response = success(
-      vehiclesData,
+      filteredVehiclesData,
       "Vehicles retrieved successfully",
       200,
       {
