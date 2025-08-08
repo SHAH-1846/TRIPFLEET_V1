@@ -51,7 +51,7 @@ exports.securityHeaders = helmet({
 // CORS Configuration
 exports.corsOptions = cors({
   origin: function (origin, callback) {
-    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3002', 'https://hoppscotch.io'];
+    const allowedOrigins = process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3002', 'https://hoppscotch.io', 'https://truck-api-qyew.onrender.com'];
 
     if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);

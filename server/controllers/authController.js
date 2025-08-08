@@ -121,7 +121,7 @@ exports.requestOtp = async (req, res) => {
     // Generate OTP
     const otp =
       process.env.NODE_ENV === "development"
-        ? "123456"
+        ? "1234"
         : otpGenerator.generate(6, {
             digits: true,
             alphabets: false,
