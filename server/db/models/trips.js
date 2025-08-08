@@ -7,33 +7,50 @@ const trips = new mongoose.Schema(
       ref: "users",
     },
 
-    vehicle : {
-      type : mongoose.Schema.Types.ObjectId,
-      ref : "vehicles",
+    tripAddedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "users",
+      required: true,
     },
 
-    startLocation: {
+    vehicle: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "vehicles",
+    },
+
+    driver: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "users",
+    },
+
+    goodsType: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'goods_accepted',
+      required: true,
+    },
+
+    tripStartLocation: {
       address: String,
       coordinates: {
-        lat: Number,
-        lng: Number,
+        type: [Number], // [lng, lat]
+        required: true
       },
     },
 
-    destination: {
+    tripDestination: {
       address: String,
       coordinates: {
-        lat: Number,
-        lng: Number,
+        type: [Number], // [lng, lat]
+        required: true
       },
     },
 
-    routeCoordinates: [
-      {
-        lat: Number,
-        lng: Number,
-      },
-    ],
+    // routeCoordinates: [
+    //   {
+    //     lat: Number,
+    //     lng: Number,
+    //   },
+    // ],
 
     routeGeoJSON: {
       type: {
@@ -79,13 +96,25 @@ const trips = new mongoose.Schema(
     tripDate: Date,
     startTime: String,
     endTime: String,
+    tripStartDate: {
+      type: Date,
+      required: true,
+    },
+    tripEndDate: {
+      type: Date,
+      required: true,
+    },
   },
   {
     timestamps: true,
   }
 );
 
-trips.index({ "startLocation.address": "text", "destination.address": "text" });
+trips.index({ "tripStartLocation.address": "text", "tripDestination.address": "text" });
 //Add 2dsphere index for routeGeoJSON
 trips.index({ routeGeoJSON: "2dsphere" });
+//Add 2dsphere indexes for location coordinates
+trips.index({ "tripStartLocation.coordinates": "2dsphere" });
+trips.index({ "tripDestination.coordinates": "2dsphere" });
+trips.index({ "currentLocation.coordinates": "2dsphere" });
 module.exports = mongoose.model("trips", trips);

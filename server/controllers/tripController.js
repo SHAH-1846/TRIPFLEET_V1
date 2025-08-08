@@ -61,52 +61,111 @@ exports.createTrip = async (req, res) => {
 
     // Check if user is a customer
     const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name !== 'customer') {
+    if (userType.name !== 'driver') {
       const response = forbidden("Only customers can create trips");
       return res.status(response.statusCode).json(response);
     }
 
-    // Validate pickup date is in the future
-    const pickupDate = new Date(value.pickupDate);
+    // Validate trip dates are in the future and end is after start
+    const tripStartDate = new Date(value.tripStartDate);
+    const tripEndDate = new Date(value.tripEndDate);
     const now = new Date();
-    if (pickupDate <= now) {
-      const response = badRequest("Pickup date must be in the future");
+    if (tripStartDate <= now) {
+      const response = badRequest("Trip start date must be in the future");
+      return res.status(response.statusCode).json(response);
+    }
+    if (tripEndDate <= tripStartDate) {
+      const response = badRequest("Trip end date must be after start date");
       return res.status(response.statusCode).json(response);
     }
 
-    // Create trip with enhanced data
+    // Validate coordinates format
+    if (!value.tripStartLocation.coordinates || !value.tripStartLocation.coordinates.lat || !value.tripStartLocation.coordinates.lng) {
+      const response = badRequest("Invalid trip start location coordinates");
+      return res.status(response.statusCode).json(response);
+    }
+
+    if (!value.tripDestination.coordinates || !value.tripDestination.coordinates.lat || !value.tripDestination.coordinates.lng) {
+      const response = badRequest("Invalid trip destination coordinates");
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Determine routeGeoJSON coordinates
+    let routeGeoJSONCoordinates = [];
+    console.log("routeGeoJSON from request:", value.routeGeoJSON);
+    
+    if (
+      value.routeGeoJSON &&
+      Array.isArray(value.routeGeoJSON.coordinates) &&
+      value.routeGeoJSON.coordinates.length >= 2 &&
+      value.routeGeoJSON.coordinates.every(
+        coord => Array.isArray(coord) && coord.length === 2 &&
+          typeof coord[0] === 'number' && typeof coord[1] === 'number'
+      )
+    ) {
+      console.log("Using provided routeGeoJSON coordinates");
+      routeGeoJSONCoordinates = value.routeGeoJSON.coordinates;
+    } else {
+      console.log("Using fallback routeGeoJSON coordinates (start to end only)");
+      routeGeoJSONCoordinates = [
+        [value.tripStartLocation.coordinates.lng, value.tripStartLocation.coordinates.lat],
+        [value.tripDestination.coordinates.lng, value.tripDestination.coordinates.lat]
+      ];
+    }
+    
+    console.log("Final routeGeoJSONCoordinates:", routeGeoJSONCoordinates);
+
     const tripData = {
       customer: userId,
-      pickupLocation: {
-        address: value.pickupLocation.address,
-        coordinates: {
-          lat: value.pickupLocation.coordinates.lat,
-          lng: value.pickupLocation.coordinates.lng
-        }
+      tripAddedBy: userId, // The user creating the trip
+      tripStartLocation: {
+        address: value.tripStartLocation.address,
+        coordinates: [
+          value.tripStartLocation.coordinates.lng,
+          value.tripStartLocation.coordinates.lat
+        ]
       },
-      dropLocation: {
-        address: value.dropLocation.address,
-        coordinates: {
-          lat: value.dropLocation.coordinates.lat,
-          lng: value.dropLocation.coordinates.lng
-        }
+      tripDestination: {
+        address: value.tripDestination.address,
+        coordinates: [
+          value.tripDestination.coordinates.lng,
+          value.tripDestination.coordinates.lat
+        ]
       },
       goodsType: value.goodsType,
       weight: value.weight,
       description: value.description,
-      pickupDate: pickupDate,
-      budget: value.budget,
-      status: 'pending',
-      isActive: true
+      tripStartDate: tripStartDate,
+      tripEndDate: tripEndDate,
+      isActive: true,
+      currentLocation: {
+        type: "Point",
+        coordinates: [
+          value.tripStartLocation.coordinates.lng,
+          value.tripStartLocation.coordinates.lat
+        ]
+      },
+      routeGeoJSON: {
+        type: "LineString",
+        coordinates: routeGeoJSONCoordinates
+      },
+      // Add optional fields if provided
+      ...(value.distance && { distance: value.distance }),
+      ...(value.duration && { duration: value.duration }),
+      ...(value.vehicle && { vehicle: value.vehicle }),
+      ...(value.driver && { driver: value.driver })
     };
+    console.log("tripData", tripData);
 
     const newTrip = await trips.create(tripData);
 
     // Populate trip data for response
     const populatedTrip = await trips.findById(newTrip._id)
       .populate('customer', 'name email phone')
+      .populate('tripAddedBy', 'name email phone')
       .populate('driver', 'name email phone')
-      .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType');
+      .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
+      .populate('goodsType', 'name description');
 
     const response = created(
       { trip: populatedTrip },
@@ -159,26 +218,28 @@ exports.getAllTrips = async (req, res) => {
       filter.$or = [
         { goodsType: { $regex: search, $options: 'i' } },
         { description: { $regex: search, $options: 'i' } },
-        { 'pickupLocation.address': { $regex: search, $options: 'i' } },
-        { 'dropLocation.address': { $regex: search, $options: 'i' } }
+        { 'tripStartLocation.address': { $regex: search, $options: 'i' } },
+        { 'tripDestination.address': { $regex: search, $options: 'i' } }
       ];
     }
     
     if (dateFrom || dateTo) {
-      filter.pickupDate = {};
+      filter.tripStartDate = {};
       if (dateFrom) {
-        filter.pickupDate.$gte = new Date(dateFrom);
+        filter.tripStartDate.$gte = new Date(dateFrom);
       }
       if (dateTo) {
-        filter.pickupDate.$lte = new Date(dateTo);
+        filter.tripStartDate.$lte = new Date(dateTo);
       }
     }
 
     // Get trips with pagination
     const tripsData = await trips.find(filter)
       .populate('customer', 'name email phone')
+      .populate('tripAddedBy', 'name email phone')
       .populate('driver', 'name email phone')
       .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
+      .populate('goodsType', 'name description')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -230,8 +291,10 @@ exports.getTripById = async (req, res) => {
     // Get trip with populated data
     const trip = await trips.findById(tripId)
       .populate('customer', 'name email phone')
+      .populate('tripAddedBy', 'name email phone')
       .populate('driver', 'name email phone')
-      .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType truckImages');
+      .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType truckImages')
+      .populate('goodsType', 'name description');
 
     if (!trip) {
       const response = notFound("Trip not found");
@@ -325,12 +388,20 @@ exports.updateTrip = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
-    // Validate pickup date if being updated
-    if (value.pickupDate) {
-      const pickupDate = new Date(value.pickupDate);
+    // Validate trip dates if being updated
+    if (value.tripStartDate) {
+      const tripStartDate = new Date(value.tripStartDate);
       const now = new Date();
-      if (pickupDate <= now) {
-        const response = badRequest("Pickup date must be in the future");
+      if (tripStartDate <= now) {
+        const response = badRequest("Trip start date must be in the future");
+        return res.status(response.statusCode).json(response);
+      }
+    }
+    if (value.tripEndDate && value.tripStartDate) {
+      const tripStartDate = new Date(value.tripStartDate);
+      const tripEndDate = new Date(value.tripEndDate);
+      if (tripEndDate <= tripStartDate) {
+        const response = badRequest("Trip end date must be after start date");
         return res.status(response.statusCode).json(response);
       }
     }
@@ -345,8 +416,10 @@ exports.updateTrip = async (req, res) => {
       { new: true }
     )
     .populate('customer', 'name email phone')
+    .populate('tripAddedBy', 'name email phone')
     .populate('driver', 'name email phone')
-    .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType');
+    .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
+    .populate('goodsType', 'name description');
 
     const response = updated(
       { trip: updatedTrip },
@@ -421,6 +494,7 @@ exports.cancelTrip = async (req, res) => {
       { new: true }
     )
     .populate('customer', 'name email phone')
+    .populate('tripAddedBy', 'name email phone')
     .populate('driver', 'name email phone')
     .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType');
 
@@ -508,6 +582,7 @@ exports.completeTrip = async (req, res) => {
       { new: true }
     )
     .populate('customer', 'name email phone')
+    .populate('tripAddedBy', 'name email phone')
     .populate('driver', 'name email phone')
     .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType');
 

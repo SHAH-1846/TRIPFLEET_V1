@@ -192,47 +192,91 @@ const vehicleSchemas = {
 // Trip Schemas
 const tripSchemas = {
   createTrip: Joi.object({
-    pickupLocation: Joi.object({
+    tripStartLocation: Joi.object({
       address: Joi.string().trim().min(5).max(200).required(),
       coordinates: Joi.object({
         lat: Joi.number().min(-90).max(90).required(),
         lng: Joi.number().min(-180).max(180).required(),
       }).required(),
     }).required(),
-    dropLocation: Joi.object({
+    tripDestination: Joi.object({
       address: Joi.string().trim().min(5).max(200).required(),
       coordinates: Joi.object({
         lat: Joi.number().min(-90).max(90).required(),
         lng: Joi.number().min(-180).max(180).required(),
       }).required(),
     }).required(),
-    goodsType: Joi.string().trim().min(2).max(50).required(),
+    routeGeoJSON: Joi.object({
+      type: Joi.string().valid("LineString").default("LineString"),
+      coordinates: Joi.array().items(
+        Joi.array().items(Joi.number()).length(2)
+      ).min(2).optional(),
+    }).optional(),
+    distance: Joi.object({
+      value: Joi.number().min(0).required(),
+      text: Joi.string().trim().max(50).required(),
+    }).optional(),
+    duration: Joi.object({
+      value: Joi.number().min(0).required(),
+      text: Joi.string().trim().max(50).required(),
+    }).optional(),
+    vehicle: fields.objectId.optional().required(),
+    driver: fields.objectId.optional().required(),
+    goodsType: fields.objectId,
     weight: Joi.number().min(0.1).max(100).required(),
     description: Joi.string().trim().max(500).optional(),
-    pickupDate: Joi.date().min("now").required(),
-    budget: Joi.number().min(100).max(1000000).required(),
+    tripStartDate: Joi.date().iso().min('now').required().messages({
+      'date.base': 'tripStartDate must be a valid ISO date-time string',
+      'any.required': 'tripStartDate is required'
+    }),
+    tripEndDate: Joi.date().iso().greater(Joi.ref('tripStartDate')).required().messages({
+      'date.base': 'tripEndDate must be a valid ISO date-time string',
+      'date.greater': 'tripEndDate must be after tripStartDate',
+      'any.required': 'tripEndDate is required'
+    }),
   }),
 
   updateTrip: Joi.object({
-    pickupLocation: Joi.object({
+    tripStartLocation: Joi.object({
       address: Joi.string().trim().min(5).max(200).optional(),
       coordinates: Joi.object({
         lat: Joi.number().min(-90).max(90).optional(),
         lng: Joi.number().min(-180).max(180).optional(),
       }).optional(),
     }).optional(),
-    dropLocation: Joi.object({
+    tripDestination: Joi.object({
       address: Joi.string().trim().min(5).max(200).optional(),
       coordinates: Joi.object({
         lat: Joi.number().min(-90).max(90).optional(),
         lng: Joi.number().min(-180).max(180).optional(),
       }).optional(),
     }).optional(),
-    goodsType: Joi.string().trim().min(2).max(50).optional(),
+    routeGeoJSON: Joi.object({
+      type: Joi.string().valid("LineString").default("LineString"),
+      coordinates: Joi.array().items(
+        Joi.array().items(Joi.number()).length(2)
+      ).min(2).optional(),
+    }).optional(),
+    distance: Joi.object({
+      value: Joi.number().min(0).optional(),
+      text: Joi.string().trim().max(50).optional(),
+    }).optional(),
+    duration: Joi.object({
+      value: Joi.number().min(0).optional(),
+      text: Joi.string().trim().max(50).optional(),
+    }).optional(),
+    vehicle: fields.objectId.optional(),
+    driver: fields.objectId.optional(),
+    goodsType: fields.objectId.optional(),
     weight: Joi.number().min(0.1).max(100).optional(),
     description: Joi.string().trim().max(500).optional(),
-    pickupDate: Joi.date().min("now").optional(),
-    budget: Joi.number().min(100).max(1000000).optional(),
+    tripStartDate: Joi.date().iso().min('now').optional().messages({
+      'date.base': 'tripStartDate must be a valid ISO date-time string'
+    }),
+    tripEndDate: Joi.date().iso().greater(Joi.ref('tripStartDate')).optional().messages({
+      'date.base': 'tripEndDate must be a valid ISO date-time string',
+      'date.greater': 'tripEndDate must be after tripStartDate'
+    }),
   }).min(1),
 };
 

@@ -29,7 +29,7 @@ const { tripSchemas } = require('../validations/schemas');
  */
 router.post('/',
   authenticateToken,
-  requireRole(['customer']),
+  requireRole(['driver']),
   sanitizeInput,
   validateRequest(tripSchemas.createTrip),
   tripController.createTrip
