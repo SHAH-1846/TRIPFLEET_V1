@@ -34,6 +34,7 @@ const customerRequestRoutes = require("./routes/customerRequestRoutes");
 const bookingRoutes = require("./routes/bookingRoutes");
 const imageRoutes = require("./routes/imageRoutes");
 const documentRoutes = require("./routes/documentRoutes");
+const driverConnectionRoutes = require("./routes/driverConnectionRoutes");
 
 // Passport configuration
 const passport = require("passport");
@@ -125,16 +126,17 @@ app.get("/", (req, res) => {
     message: "Drivers App API",
     version: "1.0.0",
     timestamp: new Date().toISOString(),
-    endpoints: {
-      auth: "/auth",
-      users: "/users",
-      trips: "/trips",
-      vehicles: "/vehicles",
-      bookings: "/bookings",
-      customerRequests: "/customer-requests",
-      images: "/images",
-      documents: "/documents"
-    },
+          endpoints: {
+        auth: "/auth",
+        users: "/users",
+        trips: "/trips",
+        vehicles: "/vehicles",
+        bookings: "/bookings",
+        customerRequests: "/customer-requests",
+        images: "/images",
+        documents: "/documents",
+        driverConnections: "/driver-connections"
+      },
     documentation: process.env.API_DOCS_URL || "Documentation not available"
   });
 });
@@ -156,6 +158,7 @@ apiV1.use("/customer-requests", customerRequestRoutes);
 apiV1.use("/bookings", bookingRoutes);
 apiV1.use("/images", imageRoutes);
 apiV1.use("/documents", documentRoutes);
+apiV1.use("/driver-connections", driverConnectionRoutes);
 
 // Mount API version
 app.use("/api/v1", apiV1);

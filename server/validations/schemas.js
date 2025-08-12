@@ -220,8 +220,8 @@ const tripSchemas = {
       value: Joi.number().min(0).required(),
       text: Joi.string().trim().max(50).required(),
     }).optional(),
-    vehicle: fields.objectId.optional().required(),
-    driver: fields.objectId.optional().required(),
+    vehicle: fields.objectId.optional(),
+    driver: fields.objectId.optional(),
     goodsType: fields.objectId,
     weight: Joi.number().min(0.1).max(100).required(),
     description: Joi.string().trim().max(500).optional(),
@@ -347,6 +347,29 @@ const querySchemas = {
   }),
 };
 
+// Driver Connection Schemas
+const driverConnectionSchemas = {
+  sendFriendRequest: Joi.object({
+    mobileNumber: Joi.string()
+      .pattern(/^\+?[1-9]\d{7,14}$/)
+      .required()
+      .messages({
+        'string.pattern.base': 'Please enter a valid international phone number (e.g. +919999999999)',
+        'string.empty': 'Mobile number is required'
+      }),
+  }),
+
+  respondToRequest: Joi.object({
+    action: Joi.string()
+      .valid('accept', 'reject')
+      .required()
+      .messages({
+        'any.only': 'Action must be either "accept" or "reject"',
+        'string.empty': 'Action is required'
+      }),
+  }),
+};
+
 // File Upload Schemas
 const fileSchemas = {
   uploadImage: Joi.object({
@@ -371,6 +394,7 @@ module.exports = {
   tripSchemas,
   bookingSchemas,
   customerRequestSchemas,
+  driverConnectionSchemas,
   querySchemas,
   fileSchemas,
   patterns,
