@@ -104,6 +104,10 @@ const trips = new mongoose.Schema(
       type: Date,
       required: true,
     },
+    isActive: {
+      type: Boolean,
+      default: true
+    }
   },
   {
     timestamps: true,

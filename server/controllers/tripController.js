@@ -10,6 +10,8 @@ const trips = require("../db/models/trips");
 const users = require("../db/models/users");
 const vehicles = require("../db/models/vehicles");
 const bookings = require("../db/models/bookings");
+require("../db/models/goods_accepted");
+require("../db/models/trip_status");
 
 // Utils
 const { 
@@ -27,6 +29,123 @@ const {
 
 // Validation schemas
 const { tripSchemas } = require("../validations/schemas");
+
+/**
+ * Validate vehicle ownership
+ * @param {string} vehicleId - Vehicle ID to validate
+ * @param {string} userId - Current user ID
+ * @returns {Object} Validation result with vehicle data or error
+ */
+const validateVehicleOwnership = async (vehicleId, userId) => {
+  try {
+    const vehicle = await vehicles.findById(vehicleId);
+    if (!vehicle) {
+      return { isValid: false, error: "Vehicle not found" };
+    }
+    
+    if (vehicle.user.toString() !== userId) {
+      return { isValid: false, error: "You can only use your own vehicles for trips" };
+    }
+    
+    return { isValid: true, vehicle };
+  } catch (error) {
+    console.error("Vehicle ownership validation error:", error);
+    return { isValid: false, error: "Failed to validate vehicle ownership" };
+  }
+};
+
+/**
+ * Validate driver assignment
+ * @param {string} driverId - Driver ID to validate
+ * @param {string} userId - Current user ID
+ * @param {boolean} selfDrive - Whether the current user is driving
+ * @returns {Object} Validation result with driver data or error
+ */
+const validateDriverAssignment = async (driverId, userId, selfDrive) => {
+  try {
+    const driver = await users.findById(driverId);
+    if (!driver) {
+      return { isValid: false, error: "Driver not found" };
+    }
+    
+    if (selfDrive) {
+      // If self-drive, driver must be the current user
+      if (driverId !== userId) {
+        return { isValid: false, error: "For self-drive trips, driver must be the current user" };
+      }
+    } else {
+      // If not self-drive, check if driver has active connection with current user
+      const driverConnections = require("../db/models/driver_connections");
+      const connection = await driverConnections.findOne({
+        $or: [
+          { requester: userId, requested: driverId },
+          { requester: driverId, requested: userId }
+        ],
+        status: 'accepted',
+        isActive: true
+      });
+      
+      if (!connection) {
+        return { isValid: false, error: "Driver must be a connected friend to assign them to your trip" };
+      }
+    }
+    
+    return { isValid: true, driver };
+  } catch (error) {
+    console.error("Driver assignment validation error:", error);
+    return { isValid: false, error: "Failed to validate driver assignment" };
+  }
+};
+
+/**
+ * Check driver availability for the trip period
+ * @param {string} driverId - Driver ID to check
+ * @param {Date} tripStartDate - Trip start date
+ * @param {Date} tripEndDate - Trip end date
+ * @param {string} excludeTripId - Trip ID to exclude from check (for updates)
+ * @returns {Object} Validation result with availability status or error
+ */
+const checkDriverAvailability = async (driverId, tripStartDate, tripEndDate, excludeTripId = null) => {
+  try {
+    const trips = require("../db/models/trips");
+    
+    // Find overlapping trips for the driver
+    const overlappingTrips = await trips.find({
+      driver: driverId,
+      _id: { $ne: excludeTripId }, // Exclude current trip for updates
+      isActive: true,
+      $or: [
+        // Trip starts during existing trip
+        {
+          tripStartDate: { $lte: tripStartDate },
+          tripEndDate: { $gt: tripStartDate }
+        },
+        // Trip ends during existing trip
+        {
+          tripStartDate: { $lt: tripEndDate },
+          tripEndDate: { $gte: tripEndDate }
+        },
+        // Trip completely contains existing trip
+        {
+          tripStartDate: { $gte: tripStartDate },
+          tripEndDate: { $lte: tripEndDate }
+        }
+      ]
+    });
+    
+    if (overlappingTrips.length > 0) {
+      return { 
+        isAvailable: false, 
+        error: "Driver is already assigned to another trip during this time period" 
+      };
+    }
+    
+    return { isAvailable: true };
+  } catch (error) {
+    console.error("Driver availability check error:", error);
+    return { isAvailable: false, error: "Failed to check driver availability" };
+  }
+};
 
 /**
  * Create a new trip
@@ -62,7 +181,7 @@ exports.createTrip = async (req, res) => {
     // Check if user is a customer
     const userType = await require("../db/models/user_types").findById(user.user_type);
     if (userType.name !== 'driver') {
-      const response = forbidden("Only customers can create trips");
+      const response = forbidden("Only drivers can create trips");
       return res.status(response.statusCode).json(response);
     }
 
@@ -87,6 +206,27 @@ exports.createTrip = async (req, res) => {
 
     if (!value.tripDestination.coordinates || !value.tripDestination.coordinates.lat || !value.tripDestination.coordinates.lng) {
       const response = badRequest("Invalid trip destination coordinates");
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Validate vehicle ownership
+    const vehicleValidation = await validateVehicleOwnership(value.vehicle, userId);
+    if (!vehicleValidation.isValid) {
+      const response = badRequest(vehicleValidation.error);
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Validate driver assignment
+    const driverValidation = await validateDriverAssignment(value.driver, userId, value.selfDrive);
+    if (!driverValidation.isValid) {
+      const response = badRequest(driverValidation.error);
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Check driver availability for the trip period
+    const availabilityCheck = await checkDriverAvailability(value.driver, tripStartDate, tripEndDate);
+    if (!availabilityCheck.isAvailable) {
+      const response = conflict(availabilityCheck.error);
       return res.status(response.statusCode).json(response);
     }
 
@@ -161,11 +301,11 @@ exports.createTrip = async (req, res) => {
 
     // Populate trip data for response
     const populatedTrip = await trips.findById(newTrip._id)
-      .populate('customer', 'name email phone')
       .populate('tripAddedBy', 'name email phone')
       .populate('driver', 'name email phone')
       .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
-      .populate('goodsType', 'name description');
+      .populate('goodsType', 'name description')
+      .populate('status', 'name description');
 
     const response = created(
       { trip: populatedTrip },
@@ -402,6 +542,34 @@ exports.updateTrip = async (req, res) => {
       const tripEndDate = new Date(value.tripEndDate);
       if (tripEndDate <= tripStartDate) {
         const response = badRequest("Trip end date must be after start date");
+        return res.status(response.statusCode).json(response);
+      }
+    }
+
+    // Validate vehicle ownership if vehicle is being updated
+    if (value.vehicle) {
+      const vehicleValidation = await validateVehicleOwnership(value.vehicle, userId);
+      if (!vehicleValidation.isValid) {
+        const response = badRequest(vehicleValidation.error);
+        return res.status(response.statusCode).json(response);
+      }
+    }
+
+    // Validate driver assignment if driver is being updated
+    if (value.driver) {
+      const driverValidation = await validateDriverAssignment(value.driver, userId, value.selfDrive);
+      if (!driverValidation.isValid) {
+        const response = badRequest(driverValidation.error);
+        return res.status(response.statusCode).json(response);
+      }
+
+      // Check driver availability for the trip period
+      const tripStartDate = value.tripStartDate ? new Date(value.tripStartDate) : new Date(trip.tripStartDate);
+      const tripEndDate = value.tripEndDate ? new Date(value.tripEndDate) : new Date(trip.tripEndDate);
+      
+      const availabilityCheck = await checkDriverAvailability(value.driver, tripStartDate, tripEndDate, tripId);
+      if (!availabilityCheck.isAvailable) {
+        const response = conflict(availabilityCheck.error);
         return res.status(response.statusCode).json(response);
       }
     }

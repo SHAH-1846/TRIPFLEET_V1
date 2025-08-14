@@ -214,6 +214,9 @@ exports.getFriendsList = async (req, res) => {
   try {
     const userId = req.user.user_id;
 
+    // Get current user data for self-drive option
+    const currentUser = await users.findById(userId, 'name phone');
+
     const friends = await driverConnections.find({
       $or: [
         { requester: userId },
@@ -238,8 +241,21 @@ exports.getFriendsList = async (req, res) => {
       };
     });
 
+    // Add self-drive option at the beginning of the list
+    const selfDriveOption = {
+      _id: currentUser._id,
+      name: "YOU (SELF DRIVE)",
+      phone: currentUser.phone,
+      connectionId: null,
+      connectedSince: null,
+      isSelfDrive: true
+    };
+
+    // Combine self-drive option with friends list
+    const allOptions = [selfDriveOption, ...friendsList];
+
     const response = success(
-      { friends: friendsList },
+      { friends: allOptions },
       "Friends list retrieved successfully"
     );
 

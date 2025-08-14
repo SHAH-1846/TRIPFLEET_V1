@@ -220,8 +220,15 @@ const tripSchemas = {
       value: Joi.number().min(0).required(),
       text: Joi.string().trim().max(50).required(),
     }).optional(),
-    vehicle: fields.objectId.optional(),
-    driver: fields.objectId.optional(),
+    vehicle: fields.objectId.required().messages({
+      'any.required': 'Vehicle is required for the trip'
+    }),
+    driver: fields.objectId.required().messages({
+      'any.required': 'Driver is required for the trip'
+    }),
+    selfDrive: Joi.boolean().required().messages({
+      'any.required': 'selfDrive field is required to indicate if the current user is driving'
+    }),
     goodsType: fields.objectId,
     weight: Joi.number().min(0.1).max(100).required(),
     description: Joi.string().trim().max(500).optional(),
@@ -247,7 +254,7 @@ const tripSchemas = {
     tripDestination: Joi.object({
       address: Joi.string().trim().min(5).max(200).optional(),
       coordinates: Joi.object({
-        lat: Joi.number().min(-90).max(90).optional(),
+        lat: Joi.number().min(-90).max(180).optional(),
         lng: Joi.number().min(-180).max(180).optional(),
       }).optional(),
     }).optional(),
@@ -267,6 +274,7 @@ const tripSchemas = {
     }).optional(),
     vehicle: fields.objectId.optional(),
     driver: fields.objectId.optional(),
+    selfDrive: Joi.boolean().optional(),
     goodsType: fields.objectId.optional(),
     weight: Joi.number().min(0.1).max(100).optional(),
     description: Joi.string().trim().max(500).optional(),
