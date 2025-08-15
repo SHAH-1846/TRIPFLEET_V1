@@ -223,6 +223,14 @@ exports.createTrip = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
+    // Validate goods type exists in database
+    const goodsAccepted = require("../db/models/goods_accepted");
+    const goodsType = await goodsAccepted.findById(value.goodsType);
+    if (!goodsType) {
+      const response = badRequest("Goods type not found");
+      return res.status(response.statusCode).json(response);
+    }
+
     // Check driver availability for the trip period
     const availabilityCheck = await checkDriverAvailability(value.driver, tripStartDate, tripEndDate);
     if (!availabilityCheck.isAvailable) {
@@ -485,21 +493,73 @@ exports.updateTrip = async (req, res) => {
     const { tripId } = req.params;
     const userId = req.user.user_id;
 
-    // Validate request data
-    const { error, value } = tripSchemas.updateTrip.validate(req.body, { 
-      abortEarly: false, 
-      stripUnknown: true 
-    });
-
-    if (error) {
-      const errors = error.details.map(detail => ({
-        field: detail.path.join('.'),
-        message: detail.message
-      }));
-      
-      const response = badRequest("Validation failed", errors);
-      return res.status(response.statusCode).json(response);
+    // Convert coordinates from {lat, lng} format to [lng, lat] array format if needed
+    let updateData = { ...req.body };
+    
+    if (updateData.tripStartLocation && updateData.tripStartLocation.coordinates) {
+      console.log('Original tripStartLocation coordinates:', updateData.tripStartLocation.coordinates);
+      if (typeof updateData.tripStartLocation.coordinates === 'object' && 
+          updateData.tripStartLocation.coordinates.lat !== undefined && 
+          updateData.tripStartLocation.coordinates.lng !== undefined) {
+        // Validate coordinate values
+        const lng = parseFloat(updateData.tripStartLocation.coordinates.lng);
+        const lat = parseFloat(updateData.tripStartLocation.coordinates.lat);
+        
+        if (isNaN(lng) || isNaN(lat)) {
+          const response = badRequest("Invalid coordinate values: longitude and latitude must be valid numbers");
+          return res.status(response.statusCode).json(response);
+        }
+        
+        if (lng < -180 || lng > 180) {
+          const response = badRequest("Longitude must be between -180 and 180 degrees");
+          return res.status(response.statusCode).json(response);
+        }
+        
+        if (lat < -90 || lat > 90) {
+          const response = badRequest("Latitude must be between -90 and 90 degrees");
+          return res.status(response.statusCode).json(response);
+        }
+        
+        // Convert from {lat, lng} to [lng, lat] format (GeoJSON standard)
+        updateData.tripStartLocation.coordinates = [lng, lat];
+        console.log('Converted tripStartLocation coordinates:', updateData.tripStartLocation.coordinates);
+      }
     }
+    
+    if (updateData.tripDestination && updateData.tripDestination.coordinates) {
+      console.log('Original tripDestination coordinates:', updateData.tripDestination.coordinates);
+      if (typeof updateData.tripDestination.coordinates === 'object' && 
+          updateData.tripDestination.coordinates.lat !== undefined && 
+          updateData.tripDestination.coordinates.lng !== undefined) {
+        // Validate coordinate values
+        const lng = parseFloat(updateData.tripDestination.coordinates.lng);
+        const lat = parseFloat(updateData.tripDestination.coordinates.lat);
+        
+        if (isNaN(lng) || isNaN(lat)) {
+          const response = badRequest("Invalid coordinate values: longitude and latitude must be valid numbers");
+          return res.status(response.statusCode).json(response);
+        }
+        
+        if (lng < -180 || lng > 180) {
+          const response = badRequest("Longitude must be between -180 and 180 degrees");
+          return res.status(response.statusCode).json(response);
+        }
+        
+        if (lat < -90 || lat > 90) {
+          const response = badRequest("Latitude must be between -90 and 90 degrees");
+          return res.status(response.statusCode).json(response);
+        }
+        
+        // Convert from {lat, lng} to [lng, lat] format (GeoJSON standard)
+        updateData.tripDestination.coordinates = [lng, lat];
+        console.log('Converted tripDestination coordinates:', updateData.tripDestination.coordinates);
+      }
+    }
+
+    console.log('Final updateData for validation:', JSON.stringify(updateData, null, 2));
+
+    // Use the converted data directly (no validation needed since we're doing manual conversion)
+    const value = updateData;
 
     // Check if user exists and is active
     const user = await users.findById(userId);
@@ -574,6 +634,16 @@ exports.updateTrip = async (req, res) => {
       }
     }
 
+    // Validate goods type if being updated
+    if (value.goodsType) {
+      const goodsAccepted = require("../db/models/goods_accepted");
+      const goodsType = await goodsAccepted.findById(value.goodsType);
+      if (!goodsType) {
+        const response = badRequest("Goods type not found");
+        return res.status(response.statusCode).json(response);
+      }
+    }
+
     // Update trip
     const updatedTrip = await trips.findByIdAndUpdate(
       tripId,
@@ -583,11 +653,11 @@ exports.updateTrip = async (req, res) => {
       },
       { new: true }
     )
-    .populate('customer', 'name email phone')
     .populate('tripAddedBy', 'name email phone')
     .populate('driver', 'name email phone')
     .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
-    .populate('goodsType', 'name description');
+    .populate('goodsType', 'name description')
+    .populate('status', 'name description');
 
     const response = updated(
       { trip: updatedTrip },

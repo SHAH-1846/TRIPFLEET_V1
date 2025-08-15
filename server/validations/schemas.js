@@ -230,7 +230,7 @@ const tripSchemas = {
       'any.required': 'selfDrive field is required to indicate if the current user is driving'
     }),
     goodsType: fields.objectId,
-    weight: Joi.number().min(0.1).max(100).required(),
+    weight: Joi.number().min(0.1).max(100).optional(),
     description: Joi.string().trim().max(500).optional(),
     tripStartDate: Joi.date().iso().min('now').required().messages({
       'date.base': 'tripStartDate must be a valid ISO date-time string',

@@ -17,6 +17,7 @@
     "seed:vehicle_types": "node db/seeders/vehicleTypeSeeder.js",
     "seed:vehicle_body_types": "node db/seeders/vehicleBodyTypeSeeder.js",
     "seed:goods_accepted": "node db/seeders/goodsAcceptedSeeder.js",
+    "seed:trip_status" : "node db/seeders/tripStatusSeeder.js",
     "seed": "node db/seeders/run-seeders.js",
     "cleanup": "node utils/cleanupOrphanedFiles.js",
     "health": "curl http://localhost:3002/health"
