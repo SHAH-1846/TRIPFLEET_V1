@@ -14,17 +14,17 @@ require("../db/models/goods_accepted");
 require("../db/models/trip_status");
 
 // Utils
-const { 
-  success, 
-  created, 
-  updated, 
-  deleted, 
-  badRequest, 
-  unauthorized, 
-  forbidden, 
-  notFound, 
-  conflict, 
-  serverError 
+const {
+  success,
+  created,
+  updated,
+  deleted,
+  badRequest,
+  unauthorized,
+  forbidden,
+  notFound,
+  conflict,
+  serverError
 } = require("../utils/response-handler");
 
 // Validation schemas
@@ -42,11 +42,11 @@ const validateVehicleOwnership = async (vehicleId, userId) => {
     if (!vehicle) {
       return { isValid: false, error: "Vehicle not found" };
     }
-    
+
     if (vehicle.user.toString() !== userId) {
       return { isValid: false, error: "You can only use your own vehicles for trips" };
     }
-    
+
     return { isValid: true, vehicle };
   } catch (error) {
     console.error("Vehicle ownership validation error:", error);
@@ -67,7 +67,7 @@ const validateDriverAssignment = async (driverId, userId, selfDrive) => {
     if (!driver) {
       return { isValid: false, error: "Driver not found" };
     }
-    
+
     if (selfDrive) {
       // If self-drive, driver must be the current user
       if (driverId !== userId) {
@@ -84,12 +84,12 @@ const validateDriverAssignment = async (driverId, userId, selfDrive) => {
         status: 'accepted',
         isActive: true
       });
-      
+
       if (!connection) {
         return { isValid: false, error: "Driver must be a connected friend to assign them to your trip" };
       }
     }
-    
+
     return { isValid: true, driver };
   } catch (error) {
     console.error("Driver assignment validation error:", error);
@@ -108,7 +108,7 @@ const validateDriverAssignment = async (driverId, userId, selfDrive) => {
 const checkDriverAvailability = async (driverId, tripStartDate, tripEndDate, excludeTripId = null) => {
   try {
     const trips = require("../db/models/trips");
-    
+
     // Find overlapping trips for the driver
     const overlappingTrips = await trips.find({
       driver: driverId,
@@ -132,14 +132,14 @@ const checkDriverAvailability = async (driverId, tripStartDate, tripEndDate, exc
         }
       ]
     });
-    
+
     if (overlappingTrips.length > 0) {
-      return { 
-        isAvailable: false, 
-        error: "Driver is already assigned to another trip during this time period" 
+      return {
+        isAvailable: false,
+        error: "Driver is already assigned to another trip during this time period"
       };
     }
-    
+
     return { isAvailable: true };
   } catch (error) {
     console.error("Driver availability check error:", error);
@@ -156,9 +156,9 @@ exports.createTrip = async (req, res) => {
     const userId = req.user.user_id;
 
     // Validate request data
-    const { error, value } = tripSchemas.createTrip.validate(req.body, { 
-      abortEarly: false, 
-      stripUnknown: true 
+    const { error, value } = tripSchemas.createTrip.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true
     });
 
     if (error) {
@@ -166,7 +166,7 @@ exports.createTrip = async (req, res) => {
         field: detail.path.join('.'),
         message: detail.message
       }));
-      
+
       const response = badRequest("Validation failed", errors);
       return res.status(response.statusCode).json(response);
     }
@@ -241,7 +241,7 @@ exports.createTrip = async (req, res) => {
     // Determine routeGeoJSON coordinates
     let routeGeoJSONCoordinates = [];
     console.log("routeGeoJSON from request:", value.routeGeoJSON);
-    
+
     if (
       value.routeGeoJSON &&
       Array.isArray(value.routeGeoJSON.coordinates) &&
@@ -260,7 +260,7 @@ exports.createTrip = async (req, res) => {
         [value.tripDestination.coordinates.lng, value.tripDestination.coordinates.lat]
       ];
     }
-    
+
     console.log("Final routeGeoJSONCoordinates:", routeGeoJSONCoordinates);
 
     const tripData = {
@@ -336,7 +336,18 @@ exports.createTrip = async (req, res) => {
 exports.getAllTrips = async (req, res) => {
   try {
     const userId = req.user.user_id;
-    const { page = 1, limit = 10, status, search, dateFrom, dateTo } = req.query;
+    const { 
+      page = 1, 
+      limit = 10, 
+      status, 
+      search, 
+      dateFrom, 
+      dateTo,
+      currentLocation,
+      pickupLocation,
+      dropoffLocation,
+      pickupDropoffBoth
+    } = req.query;
     const skip = (page - 1) * limit;
 
     // Check if user exists and is active
@@ -348,11 +359,11 @@ exports.getAllTrips = async (req, res) => {
 
     // Build filter object
     const filter = { isActive: true };
-    
+
     if (status) {
       filter.status = status;
     }
-    
+
     if (search) {
       filter.$or = [
         { goodsType: { $regex: search, $options: 'i' } },
@@ -361,7 +372,7 @@ exports.getAllTrips = async (req, res) => {
         { 'tripDestination.address': { $regex: search, $options: 'i' } }
       ];
     }
-    
+
     if (dateFrom || dateTo) {
       filter.tripStartDate = {};
       if (dateFrom) {
@@ -372,19 +383,229 @@ exports.getAllTrips = async (req, res) => {
       }
     }
 
-    // Get trips with pagination
-    const tripsData = await trips.find(filter)
-      .populate('customer', 'name email phone')
-      .populate('tripAddedBy', 'name email phone')
-      .populate('driver', 'name email phone')
-      .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
-      .populate('goodsType', 'name description')
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(parseInt(limit));
+    // Location-based filtering using two-step approach for better accuracy
+    console.log("currentLocation", currentLocation);
+    console.log("pickupLocation", pickupLocation);
+    console.log("dropoffLocation", dropoffLocation);
+    console.log("pickupDropoffBoth", pickupDropoffBoth);
+    
+    // Helper function to calculate distance between two points in meters
+    const getDistanceFromLatLonInMeters = (lat1, lon1, lat2, lon2) => {
+      const R = 6371; // Radius of the earth in km
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      const distance = R * c; // Distance in km
+      return distance * 1000; // Convert to meters
+    };
 
-    // Get total count
-    const total = await trips.countDocuments(filter);
+    // Parse coordinates from query parameters
+    let pickupLat, pickupLng, dropoffLat, dropoffLng, currentLat, currentLng;
+    const searchRadius = 5000; // 5km in meters
+
+    if (currentLocation) {
+      try {
+        if (Array.isArray(currentLocation)) {
+          [currentLng, currentLat] = currentLocation;
+        } else if (typeof currentLocation === 'string') {
+          [currentLng, currentLat] = currentLocation.split(',').map(coord => parseFloat(coord.trim()));
+        }
+        console.log("Current location parsed:", { currentLng, currentLat });
+      } catch (error) {
+        console.error("Invalid current location coordinates:", error);
+      }
+    }
+
+    if (pickupLocation) {
+      try {
+        if (Array.isArray(pickupLocation)) {
+          [pickupLng, pickupLat] = pickupLocation;
+        } else if (typeof pickupLocation === 'string') {
+          [pickupLng, pickupLat] = pickupLocation.split(',').map(coord => parseFloat(coord.trim()));
+        }
+        console.log("Pickup location parsed:", { pickupLng, pickupLat });
+      } catch (error) {
+        console.error("Invalid pickup location coordinates:", error);
+      }
+    }
+
+    if (dropoffLocation) {
+      try {
+        if (Array.isArray(dropoffLocation)) {
+          [dropoffLng, dropoffLat] = dropoffLocation;
+        } else if (typeof dropoffLocation === 'string') {
+          [dropoffLng, dropoffLat] = dropoffLocation.split(',').map(coord => parseFloat(coord.trim()));
+        }
+        console.log("Dropoff location parsed:", { dropoffLng, dropoffLat });
+      } catch (error) {
+        console.error("Invalid dropoff location coordinates:", error);
+      }
+    }
+
+    // Two-step location filtering approach for better accuracy
+    let tripsData = [];
+    let total = 0;
+
+    if (pickupLat && pickupLng) {
+      // Step 1: Find trips near pickup point
+      console.log("Step 1: Finding trips near pickup point:", { pickupLng, pickupLat });
+      const pickupNearbyTrips = await trips
+        .find({
+          routeGeoJSON: {
+            $near: {
+              $geometry: {
+                type: "Point",
+                coordinates: [pickupLng, pickupLat],
+              },
+              $maxDistance: searchRadius,
+            },
+          },
+          ...(Object.keys(filter).length ? { $and: [filter] } : {}),
+        })
+        .populate('tripAddedBy', 'name email phone')
+        .populate('driver', 'name email phone')
+        .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
+        .populate('goodsType', 'name description')
+        .populate('status', 'name description')
+        .sort({ _id: -1 })
+        .skip(skip)
+        .limit(parseInt(limit));
+
+      console.log(`Found ${pickupNearbyTrips.length} trips near pickup point`);
+
+      // Step 2: Filter those that also pass near dropoff point
+      if (dropoffLat && dropoffLng) {
+        console.log("Step 2: Filtering for dropoff proximity:", { dropoffLng, dropoffLat });
+        tripsData = pickupNearbyTrips.filter((trip) => {
+          if (!trip.routeGeoJSON || !trip.routeGeoJSON.coordinates) {
+            return false;
+          }
+          
+          // Check if any route coordinate is within radius of dropoff location
+          return trip.routeGeoJSON.coordinates.some((coord) => {
+            const [lng, lat] = coord;
+            const dist = getDistanceFromLatLonInMeters(
+              lat,
+              lng,
+              dropoffLat,
+              dropoffLng
+            );
+            return dist <= searchRadius;
+          });
+        });
+        console.log(`After dropoff filtering: ${tripsData.length} trips`);
+      } else {
+        tripsData = pickupNearbyTrips;
+      }
+      
+      // Get total count for pagination
+      total = await trips.countDocuments({
+        routeGeoJSON: {
+          $near: {
+            $geometry: {
+              type: "Point",
+              coordinates: [pickupLng, pickupLat],
+            },
+            $maxDistance: searchRadius,
+          },
+        },
+        ...(Object.keys(filter).length ? { $and: [filter] } : {}),
+      });
+
+    } else if (dropoffLat && dropoffLng) {
+      // Only dropoff provided
+      console.log("Finding trips near dropoff point:", { dropoffLng, dropoffLat });
+      tripsData = await trips
+        .find({
+          routeGeoJSON: {
+            $near: {
+              $geometry: {
+                type: "Point",
+                coordinates: [dropoffLng, dropoffLat],
+              },
+              $maxDistance: searchRadius,
+            },
+          },
+          ...(Object.keys(filter).length ? { $and: [filter] } : {}),
+        })
+        .populate('tripAddedBy', 'name email phone')
+        .populate('driver', 'name email phone')
+        .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
+        .populate('goodsType', 'name description')
+        .populate('status', 'name description')
+        .sort({ _id: -1 })
+        .skip(skip)
+        .limit(parseInt(limit));
+
+      total = await trips.countDocuments({
+        routeGeoJSON: {
+          $near: {
+            $geometry: {
+              type: "Point",
+              coordinates: [dropoffLng, dropoffLat],
+            },
+            $maxDistance: searchRadius,
+          },
+        },
+        ...(Object.keys(filter).length ? { $and: [filter] } : {}),
+      });
+
+    } else if (currentLat && currentLng) {
+      // Current location filtering
+      console.log("Finding trips near current location:", { currentLng, currentLat });
+      tripsData = await trips
+        .find({
+          routeGeoJSON: {
+            $near: {
+              $geometry: {
+                type: "Point",
+                coordinates: [currentLng, currentLat],
+              },
+              $maxDistance: searchRadius,
+            },
+          },
+          ...(Object.keys(filter).length ? { $and: [filter] } : {}),
+        })
+        .populate('tripAddedBy', 'name email phone')
+        .populate('driver', 'name email phone')
+        .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
+        .populate('goodsType', 'name description')
+        .populate('status', 'name description')
+        .sort({ _id: -1 })
+        .skip(skip)
+        .limit(parseInt(limit));
+
+      total = await trips.countDocuments({
+        routeGeoJSON: {
+          $near: {
+            $geometry: {
+              type: "Point",
+              coordinates: [currentLng, currentLat],
+            },
+            $maxDistance: searchRadius,
+          },
+        },
+        ...(Object.keys(filter).length ? { $and: [filter] } : {}),
+      });
+
+    } else {
+      // No location filtering - use standard approach
+      console.log("No location filtering - using standard query");
+      tripsData = await trips.find(filter)
+        .populate('tripAddedBy', 'name email phone')
+        .populate('driver', 'name email phone')
+        .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
+        .populate('goodsType', 'name description')
+        .populate('status', 'name description')
+        .sort({ _id: -1 })
+        .skip(skip)
+        .limit(parseInt(limit));
+
+      total = await trips.countDocuments(filter);
+    }
 
     const response = success(
       tripsData,
@@ -446,7 +667,7 @@ exports.getTripById = async (req, res) => {
       const response = forbidden("Access denied");
       return res.status(response.statusCode).json(response);
     }
-    
+
     if (userType.name === 'driver' && trip.driver && trip.driver._id.toString() !== userId) {
       const response = forbidden("Access denied");
       return res.status(response.statusCode).json(response);
@@ -459,7 +680,7 @@ exports.getTripById = async (req, res) => {
       .sort({ createdAt: -1 });
 
     const response = success(
-      { 
+      {
         trip,
         bookings: relatedBookings
       },
@@ -486,61 +707,61 @@ exports.updateTrip = async (req, res) => {
 
     // Convert coordinates from {lat, lng} format to [lng, lat] array format if needed
     let updateData = { ...req.body };
-    
+
     if (updateData.tripStartLocation && updateData.tripStartLocation.coordinates) {
       console.log('Original tripStartLocation coordinates:', updateData.tripStartLocation.coordinates);
-      if (typeof updateData.tripStartLocation.coordinates === 'object' && 
-          updateData.tripStartLocation.coordinates.lat !== undefined && 
-          updateData.tripStartLocation.coordinates.lng !== undefined) {
+      if (typeof updateData.tripStartLocation.coordinates === 'object' &&
+        updateData.tripStartLocation.coordinates.lat !== undefined &&
+        updateData.tripStartLocation.coordinates.lng !== undefined) {
         // Validate coordinate values
         const lng = parseFloat(updateData.tripStartLocation.coordinates.lng);
         const lat = parseFloat(updateData.tripStartLocation.coordinates.lat);
-        
+
         if (isNaN(lng) || isNaN(lat)) {
           const response = badRequest("Invalid coordinate values: longitude and latitude must be valid numbers");
           return res.status(response.statusCode).json(response);
         }
-        
+
         if (lng < -180 || lng > 180) {
           const response = badRequest("Longitude must be between -180 and 180 degrees");
           return res.status(response.statusCode).json(response);
         }
-        
+
         if (lat < -90 || lat > 90) {
           const response = badRequest("Latitude must be between -90 and 90 degrees");
           return res.status(response.statusCode).json(response);
         }
-        
+
         // Convert from {lat, lng} to [lng, lat] format (GeoJSON standard)
         updateData.tripStartLocation.coordinates = [lng, lat];
         console.log('Converted tripStartLocation coordinates:', updateData.tripStartLocation.coordinates);
       }
     }
-    
+
     if (updateData.tripDestination && updateData.tripDestination.coordinates) {
       console.log('Original tripDestination coordinates:', updateData.tripDestination.coordinates);
-      if (typeof updateData.tripDestination.coordinates === 'object' && 
-          updateData.tripDestination.coordinates.lat !== undefined && 
-          updateData.tripDestination.coordinates.lng !== undefined) {
+      if (typeof updateData.tripDestination.coordinates === 'object' &&
+        updateData.tripDestination.coordinates.lat !== undefined &&
+        updateData.tripDestination.coordinates.lng !== undefined) {
         // Validate coordinate values
         const lng = parseFloat(updateData.tripDestination.coordinates.lng);
         const lat = parseFloat(updateData.tripDestination.coordinates.lat);
-        
+
         if (isNaN(lng) || isNaN(lat)) {
           const response = badRequest("Invalid coordinate values: longitude and latitude must be valid numbers");
           return res.status(response.statusCode).json(response);
         }
-        
+
         if (lng < -180 || lng > 180) {
           const response = badRequest("Longitude must be between -180 and 180 degrees");
           return res.status(response.statusCode).json(response);
         }
-        
+
         if (lat < -90 || lat > 90) {
           const response = badRequest("Latitude must be between -90 and 90 degrees");
           return res.status(response.statusCode).json(response);
         }
-        
+
         // Convert from {lat, lng} to [lng, lat] format (GeoJSON standard)
         updateData.tripDestination.coordinates = [lng, lat];
         console.log('Converted tripDestination coordinates:', updateData.tripDestination.coordinates);
@@ -617,7 +838,7 @@ exports.updateTrip = async (req, res) => {
       // Check driver availability for the trip period
       const tripStartDate = value.tripStartDate ? new Date(value.tripStartDate) : new Date(trip.tripStartDate);
       const tripEndDate = value.tripEndDate ? new Date(value.tripEndDate) : new Date(trip.tripEndDate);
-      
+
       const availabilityCheck = await checkDriverAvailability(value.driver, tripStartDate, tripEndDate, tripId);
       if (!availabilityCheck.isAvailable) {
         const response = conflict(availabilityCheck.error);
@@ -638,17 +859,17 @@ exports.updateTrip = async (req, res) => {
     // Update trip
     const updatedTrip = await trips.findByIdAndUpdate(
       tripId,
-      { 
+      {
         ...value,
         updatedAt: new Date()
       },
       { new: true }
     )
-    .populate('tripAddedBy', 'name email phone')
-    .populate('driver', 'name email phone')
-    .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
-    .populate('goodsType', 'name description')
-    .populate('status', 'name description');
+      .populate('tripAddedBy', 'name email phone')
+      .populate('driver', 'name email phone')
+      .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
+      .populate('goodsType', 'name description')
+      .populate('status', 'name description');
 
     const response = updated(
       { trip: updatedTrip },
@@ -701,9 +922,9 @@ exports.cancelTrip = async (req, res) => {
     }
 
     // Check if trip has active bookings
-    const activeBookings = await bookings.find({ 
-      trip: tripId, 
-      status: { $in: ['confirmed', 'in_progress'] } 
+    const activeBookings = await bookings.find({
+      trip: tripId,
+      status: { $in: ['confirmed', 'in_progress'] }
     });
 
     if (activeBookings.length > 0) {
@@ -714,7 +935,7 @@ exports.cancelTrip = async (req, res) => {
     // Cancel trip
     const cancelledTrip = await trips.findByIdAndUpdate(
       tripId,
-      { 
+      {
         status: 'cancelled',
         cancelledAt: new Date(),
         cancelledBy: userId,
@@ -722,10 +943,10 @@ exports.cancelTrip = async (req, res) => {
       },
       { new: true }
     )
-    .populate('customer', 'name email phone')
-    .populate('tripAddedBy', 'name email phone')
-    .populate('driver', 'name email phone')
-    .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType');
+      .populate('customer', 'name email phone')
+      .populate('tripAddedBy', 'name email phone')
+      .populate('driver', 'name email phone')
+      .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType');
 
     const response = updated(
       { trip: cancelledTrip },
@@ -788,8 +1009,8 @@ exports.completeTrip = async (req, res) => {
     }
 
     // Check if trip has confirmed booking
-    const confirmedBooking = await bookings.findOne({ 
-      trip: tripId, 
+    const confirmedBooking = await bookings.findOne({
+      trip: tripId,
       status: 'confirmed',
       driver: userId
     });
@@ -802,7 +1023,7 @@ exports.completeTrip = async (req, res) => {
     // Complete trip
     const completedTrip = await trips.findByIdAndUpdate(
       tripId,
-      { 
+      {
         status: 'completed',
         completedAt: new Date(),
         completedBy: userId,
@@ -810,10 +1031,10 @@ exports.completeTrip = async (req, res) => {
       },
       { new: true }
     )
-    .populate('customer', 'name email phone')
-    .populate('tripAddedBy', 'name email phone')
-    .populate('driver', 'name email phone')
-    .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType');
+      .populate('customer', 'name email phone')
+      .populate('tripAddedBy', 'name email phone')
+      .populate('driver', 'name email phone')
+      .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType');
 
     // Update booking status
     await bookings.findByIdAndUpdate(confirmedBooking._id, {

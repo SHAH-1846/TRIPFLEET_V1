@@ -78,6 +78,11 @@ const trips = new mongoose.Schema(
       default: false,
     },
 
+    isActive : {
+      type: Boolean,
+      default: true,
+    },
+
     status: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "trip_status",

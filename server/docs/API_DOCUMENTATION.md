@@ -331,8 +331,35 @@ Authorization: Bearer <access_token>
 }
 ```
 
-### 2. Get Trips (with pagination)
+### 2. Get Trips (with pagination and location filtering)
 **GET** `/trips?page=1&limit=10&status=pending`
+
+**Query Parameters:**
+- `page` (optional): Page number for pagination (default: 1)
+- `limit` (optional): Number of trips per page (default: 10)
+- `status` (optional): Filter by trip status
+- `search` (optional): Text search in goods type, description, or addresses
+- `dateFrom` (optional): Filter trips from this date
+- `dateTo` (optional): Filter trips until this date
+- `currentLocation` (optional): Filter trips near current location (format: `longitude,latitude`)
+- `pickupLocation` (optional): Filter trips near pickup location (format: `longitude,latitude`)
+- `dropoffLocation` (optional): Filter trips near dropoff location (format: `longitude,latitude`)
+- `pickupDropoffBoth` (optional): Set to `true` to find trips passing through both pickup and dropoff locations
+
+**Location Filtering Examples:**
+```
+# Find trips near a specific location
+GET /trips?currentLocation=-73.935242,40.730610
+
+# Find trips with specific pickup location
+GET /trips?pickupLocation=-73.935242,40.730610
+
+# Find trips passing through both pickup and dropoff locations
+GET /trips?pickupLocation=-73.935242,40.730610&dropoffLocation=-74.006015,40.712776&pickupDropoffBoth=true
+
+# Combine location filtering with other filters
+GET /trips?pickupLocation=-73.935242,40.730610&status=active&dateFrom=2024-01-01
+```
 
 **Headers:**
 ```
@@ -373,17 +400,18 @@ Authorization: Bearer <access_token>
       "createdAt": "2024-01-15T10:30:00.000Z"
     }
   ],
-  "meta": {
-    "pagination": {
-      "page": 1,
-      "limit": 10,
-      "total": 25,
-      "totalPages": 3,
-      "hasNext": true,
-      "hasPrev": false
+  "pagination": {
+    "page": 1,
+    "limit": 10,
+    "total": 25,
+    "totalPages": 3,
+    "hasNext": true,
+    "hasPrev": false
     }
   }
 }
+
+**Note:** For detailed information about location filtering, see [Location Filtering API Documentation](./LOCATION_FILTERING_API.md).
 ```
 
 ### 3. Update Trip
