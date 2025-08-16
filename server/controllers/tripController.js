@@ -349,15 +349,6 @@ exports.getAllTrips = async (req, res) => {
     // Build filter object
     const filter = { isActive: true };
     
-    // Filter by user role
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'customer') {
-      filter.customer = userId;
-    } else if (userType.name === 'driver') {
-      filter.driver = userId;
-    }
-    // Admin can see all trips
-    
     if (status) {
       filter.status = status;
     }
@@ -914,16 +905,8 @@ exports.getTripStats = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
-    // Build filter based on user role
+    // Build filter - all users can see all trip statistics
     const filter = { isActive: true };
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    
-    if (userType.name === 'customer') {
-      filter.customer = userId;
-    } else if (userType.name === 'driver') {
-      filter.driver = userId;
-    }
-    // Admin can see all stats
 
     // Get statistics
     const stats = await trips.aggregate([
