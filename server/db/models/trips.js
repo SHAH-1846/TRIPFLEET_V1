@@ -112,7 +112,12 @@ const trips = new mongoose.Schema(
     isActive: {
       type: Boolean,
       default: true
-    }
+    },
+    deletedAt: Date,
+    deletedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "users",
+    },
   },
   {
     timestamps: true,

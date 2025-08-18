@@ -47,6 +47,17 @@ router.get('/',
 );
 
 /**
+ * @route GET /api/v1/trips/my
+ * @desc Get current user's trips (optionally include trips where user is driver)
+ * @access Private (authenticated users)
+ */
+router.get('/my',
+  authenticateToken,
+  pagination,
+  tripController.getMyTrips
+);
+
+/**
  * @route GET /api/v1/trips/stats
  * @desc Get trip statistics
  * @access Private (authenticated users)

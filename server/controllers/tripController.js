@@ -365,9 +365,8 @@ exports.getAllTrips = async (req, res) => {
     }
 
     if (search) {
+      // Search only string fields; avoid regex on ObjectId refs (e.g., goodsType)
       filter.$or = [
-        { goodsType: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
         { 'tripStartLocation.address': { $regex: search, $options: 'i' } },
         { 'tripDestination.address': { $regex: search, $options: 'i' } }
       ];
@@ -402,10 +401,46 @@ exports.getAllTrips = async (req, res) => {
       return distance * 1000; // Convert to meters
     };
 
+    // Helper to build an approximate circle polygon around a point (for $geoIntersects on LineString route)
+    const makeCirclePolygon = (lng, lat, radiusMeters, steps = 64) => {
+      const earthRadius = 6371000; // meters
+      const d = radiusMeters / earthRadius; // angular distance in radians
+      const latRad = lat * Math.PI / 180;
+      const lngRad = lng * Math.PI / 180;
+
+      const coords = [];
+      for (let i = 0; i <= steps; i++) {
+        const brng = 2 * Math.PI * (i / steps);
+        const lat2 = Math.asin(
+          Math.sin(latRad) * Math.cos(d) +
+          Math.cos(latRad) * Math.sin(d) * Math.cos(brng)
+        );
+        const lng2 = lngRad + Math.atan2(
+          Math.sin(brng) * Math.sin(d) * Math.cos(latRad),
+          Math.cos(d) - Math.sin(latRad) * Math.sin(lat2)
+        );
+        coords.push([(lng2 * 180 / Math.PI), (lat2 * 180 / Math.PI)]);
+      }
+
+      return {
+        type: "Polygon",
+        coordinates: [coords]
+      };
+    };
+
     // Parse coordinates from query parameters
     let pickupLat, pickupLng, dropoffLat, dropoffLng, currentLat, currentLng;
-    const searchRadius = 5000; // 5km in meters
-
+    // Radius (meters): configurable via query params `searchRadius` or `radius`, default 5000
+    let searchRadius = 5000;
+    const radiusParam = typeof req.query.searchRadius !== 'undefined' ? req.query.searchRadius : req.query.radius;
+    if (typeof radiusParam !== 'undefined') {
+      const parsedRadius = parseInt(radiusParam, 10);
+      if (!Number.isNaN(parsedRadius) && parsedRadius > 0) {
+        searchRadius = parsedRadius;
+      }
+    }
+    console.log("searchRadius", searchRadius);
+    console.log("filter", filter);
     if (currentLocation) {
       try {
         if (Array.isArray(currentLocation)) {
@@ -452,17 +487,10 @@ exports.getAllTrips = async (req, res) => {
     if (pickupLat && pickupLng) {
       // Step 1: Find trips near pickup point
       console.log("Step 1: Finding trips near pickup point:", { pickupLng, pickupLat });
+      const pickupCircle = makeCirclePolygon(pickupLng, pickupLat, searchRadius);
       const pickupNearbyTrips = await trips
         .find({
-          routeGeoJSON: {
-            $near: {
-              $geometry: {
-                type: "Point",
-                coordinates: [pickupLng, pickupLat],
-              },
-              $maxDistance: searchRadius,
-            },
-          },
+          routeGeoJSON: { $geoIntersects: { $geometry: pickupCircle } },
           ...(Object.keys(filter).length ? { $and: [filter] } : {}),
         })
         .populate('tripAddedBy', 'name email phone')
@@ -503,36 +531,20 @@ exports.getAllTrips = async (req, res) => {
       
       // Get total count for pagination
       total = await trips.countDocuments({
-        routeGeoJSON: {
-          $near: {
-            $geometry: {
-              type: "Point",
-              coordinates: [pickupLng, pickupLat],
-            },
-            $maxDistance: searchRadius,
-          },
-        },
+        routeGeoJSON: { $geoIntersects: { $geometry: pickupCircle } },
         ...(Object.keys(filter).length ? { $and: [filter] } : {}),
       });
 
     } else if (dropoffLat && dropoffLng) {
       // Only dropoff provided
       console.log("Finding trips near dropoff point:", { dropoffLng, dropoffLat });
+      const dropoffCircle = makeCirclePolygon(dropoffLng, dropoffLat, searchRadius);
       tripsData = await trips
         .find({
-          routeGeoJSON: {
-            $near: {
-              $geometry: {
-                type: "Point",
-                coordinates: [dropoffLng, dropoffLat],
-              },
-              $maxDistance: searchRadius,
-            },
-          },
+          routeGeoJSON: { $geoIntersects: { $geometry: dropoffCircle } },
           ...(Object.keys(filter).length ? { $and: [filter] } : {}),
         })
         .populate('tripAddedBy', 'name email phone')
-        .populate('driver', 'name email phone')
         .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
         .populate('goodsType', 'name description')
         .populate('status', 'name description')
@@ -541,32 +553,17 @@ exports.getAllTrips = async (req, res) => {
         .limit(parseInt(limit));
 
       total = await trips.countDocuments({
-        routeGeoJSON: {
-          $near: {
-            $geometry: {
-              type: "Point",
-              coordinates: [dropoffLng, dropoffLat],
-            },
-            $maxDistance: searchRadius,
-          },
-        },
+        routeGeoJSON: { $geoIntersects: { $geometry: dropoffCircle } },
         ...(Object.keys(filter).length ? { $and: [filter] } : {}),
       });
 
     } else if (currentLat && currentLng) {
       // Current location filtering
       console.log("Finding trips near current location:", { currentLng, currentLat });
+      const currentCircle = makeCirclePolygon(currentLng, currentLat, searchRadius);
       tripsData = await trips
         .find({
-          routeGeoJSON: {
-            $near: {
-              $geometry: {
-                type: "Point",
-                coordinates: [currentLng, currentLat],
-              },
-              $maxDistance: searchRadius,
-            },
-          },
+          routeGeoJSON: { $geoIntersects: { $geometry: currentCircle } },
           ...(Object.keys(filter).length ? { $and: [filter] } : {}),
         })
         .populate('tripAddedBy', 'name email phone')
@@ -579,15 +576,7 @@ exports.getAllTrips = async (req, res) => {
         .limit(parseInt(limit));
 
       total = await trips.countDocuments({
-        routeGeoJSON: {
-          $near: {
-            $geometry: {
-              type: "Point",
-              coordinates: [currentLng, currentLat],
-            },
-            $maxDistance: searchRadius,
-          },
-        },
+        routeGeoJSON: { $geoIntersects: { $geometry: currentCircle } },
         ...(Object.keys(filter).length ? { $and: [filter] } : {}),
       });
 
@@ -650,11 +639,11 @@ exports.getTripById = async (req, res) => {
 
     // Get trip with populated data
     const trip = await trips.findById(tripId)
-      .populate('customer', 'name email phone')
-      .populate('tripAddedBy', 'name email phone')
-      .populate('driver', 'name email phone')
-      .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType truckImages')
-      .populate('goodsType', 'name description');
+    .populate('tripAddedBy', 'name email phone')
+    .populate('driver', 'name email phone')
+    .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
+    .populate('goodsType', 'name description')
+    .populate('status', 'name description');
 
     if (!trip) {
       const response = notFound("Trip not found");
@@ -663,15 +652,17 @@ exports.getTripById = async (req, res) => {
 
     // Check access permissions
     const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'customer' && trip.customer._id.toString() !== userId) {
-      const response = forbidden("Access denied");
-      return res.status(response.statusCode).json(response);
-    }
+    // console.log("userId", userId);
+    // console.log("trip.tripAddedBy._id.toString()", trip.tripAddedBy._id.toString());
+    // if (trip.tripAddedBy._id.toString() !== userId.toString()) {
+    //   const response = forbidden("Access denied");
+    //   return res.status(response.statusCode).json(response);
+    // }
 
-    if (userType.name === 'driver' && trip.driver && trip.driver._id.toString() !== userId) {
-      const response = forbidden("Access denied");
-      return res.status(response.statusCode).json(response);
-    }
+    // if (userType.name === 'driver' && trip.driver && trip.driver._id.toString() !== userId) {
+    //   const response = forbidden("Access denied");
+    //   return res.status(response.statusCode).json(response);
+    // }
 
     // Get related bookings
     const relatedBookings = await bookings.find({ trip: tripId })
@@ -1082,13 +1073,13 @@ exports.deleteTrip = async (req, res) => {
 
     // Check if user can delete this trip
     const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'customer' && trip.customer.toString() !== userId) {
+    if (trip.tripAddedBy.toString() !== userId) {
       const response = forbidden("Access denied");
       return res.status(response.statusCode).json(response);
     }
 
     // Check if trip can be deleted
-    if (['in_progress', 'completed'].includes(trip.status)) {
+    if (['684942f5ff32840ef8e726f1', '684942f5ff32840ef8e726ef'].includes(trip.status)) {
       const response = badRequest("Cannot delete trip that is in progress or completed");
       return res.status(response.statusCode).json(response);
     }
@@ -1157,6 +1148,98 @@ exports.getTripStats = async (req, res) => {
   } catch (error) {
     console.error("Get trip stats error:", error);
     const response = serverError("Failed to retrieve trip statistics");
+    return res.status(response.statusCode).json(response);
+  }
+};
+
+/**
+ * Get trips created by the current user ("my trips")
+ * Optional: include trips where user is assigned as driver via includeAssigned=true
+ * Supports pagination and basic filters similar to getAllTrips
+ * @route GET /api/v1/trips/my
+ */
+exports.getMyTrips = async (req, res) => {
+  try {
+    const userId = req.user.user_id;
+    const {
+      page = 1,
+      limit = 10,
+      status,
+      search,
+      dateFrom,
+      dateTo,
+      includeAssigned
+    } = req.query;
+    const skip = (page - 1) * limit;
+
+    // Validate user
+    const user = await users.findById(userId);
+    if (!user || !user.isActive) {
+      const response = unauthorized("User not found or inactive");
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Build filter for current user's trips
+    const filter = { isActive: true };
+
+    if (includeAssigned === 'true') {
+      filter.$or = [
+        { tripAddedBy: userId },
+        { driver: userId }
+      ];
+    } else {
+      filter.tripAddedBy = userId;
+    }
+
+    if (status) {
+      filter.status = status;
+    }
+
+    if (search) {
+      filter.$or = (filter.$or || []).concat([
+        { 'tripStartLocation.address': { $regex: search, $options: 'i' } },
+        { 'tripDestination.address': { $regex: search, $options: 'i' } }
+      ]);
+    }
+
+    if (dateFrom || dateTo) {
+      filter.tripStartDate = {};
+      if (dateFrom) filter.tripStartDate.$gte = new Date(dateFrom);
+      if (dateTo) filter.tripStartDate.$lte = new Date(dateTo);
+    }
+
+    const tripsData = await trips.find(filter)
+      .populate('tripAddedBy', 'name email phone')
+      .populate('driver', 'name email phone')
+      .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
+      .populate('goodsType', 'name description')
+      .populate('status', 'name description')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await trips.countDocuments(filter);
+
+    const response = success(
+      tripsData,
+      "My trips retrieved successfully",
+      200,
+      {
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          totalPages: Math.ceil(total / limit),
+          hasNext: page < Math.ceil(total / limit),
+          hasPrev: page > 1
+        }
+      }
+    );
+
+    return res.status(response.statusCode).json(response);
+  } catch (error) {
+    console.error("Get my trips error:", error);
+    const response = serverError("Failed to retrieve my trips");
     return res.status(response.statusCode).json(response);
   }
 };
