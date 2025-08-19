@@ -28,17 +28,22 @@ const customerRequestStatuses = [
     description: "Matched with a trip"
   },
   {
-    _id: "684da13e412825ef8b404715",
+    _id: "684da132412825ef8b404715",
+    name: "Booked",
+    description: "Booked with a trip"
+  },
+  {
+    _id: "684da13e412825ef8b404716",
     name: "picked_up",
     description: "Package picked up by driver"
   },
   {
-    _id: "684da149412825ef8b404716",
+    _id: "684da149412825ef8b404717",
     name: "delivered",
     description: "Package successfully delivered"
   },
   {
-    _id: "684da154412825ef8b404717",
+    _id: "684da154412825ef8b404718",
     name: "cancelled",
     description: "Request was cancelled by customer or system"
   }

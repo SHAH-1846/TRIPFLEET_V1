@@ -308,30 +308,54 @@ const bookingSchemas = {
   }).min(1),
 };
 
-// Customer Request Schemas
+// Customer Request Schemas (aligned with customer_requests model)
 const customerRequestSchemas = {
   createRequest: Joi.object({
-    title: Joi.string().trim().min(5).max(100).required(),
-    description: Joi.string().trim().min(10).max(1000).required(),
-    category: Joi.string()
-      .valid("general", "technical", "billing", "support")
-      .required(),
-    priority: Joi.string()
-      .valid("low", "medium", "high", "urgent")
-      .default("medium"),
-    attachments: Joi.array().items(fields.objectId).optional(),
+    pickupLocation: Joi.object({
+      address: Joi.string().trim().min(3).max(200).required(),
+      coordinates: Joi.array().items(Joi.number()).length(2).required() // [lng, lat]
+    }).required(),
+    dropoffLocation: Joi.object({
+      address: Joi.string().trim().min(3).max(200).required(),
+      coordinates: Joi.array().items(Joi.number()).length(2).required() // [lng, lat]
+    }).required(),
+    packageDetails: Joi.object({
+      weight: Joi.number().min(0).optional(),
+      dimensions: Joi.object({
+        length: Joi.number().min(0).optional(),
+        width: Joi.number().min(0).optional(),
+        height: Joi.number().min(0).optional(),
+      }).optional(),
+      description: Joi.string().trim().max(500).required(),
+    }).required(),
+    images: Joi.array().items(fields.objectId).required(),
+    documents: Joi.array().items(fields.objectId).optional(),
+    pickupTime: Joi.date().iso().optional(),
+    status: fields.objectId.optional(), // customer_request_status id
   }),
 
   updateRequest: Joi.object({
-    title: Joi.string().trim().min(5).max(100).optional(),
-    description: Joi.string().trim().min(10).max(1000).optional(),
-    category: Joi.string()
-      .valid("general", "technical", "billing", "support")
-      .optional(),
-    priority: Joi.string().valid("low", "medium", "high", "urgent").optional(),
-    status: Joi.string()
-      .valid("open", "in_progress", "resolved", "closed")
-      .optional(),
+    pickupLocation: Joi.object({
+      address: Joi.string().trim().min(3).max(200).optional(),
+      coordinates: Joi.array().items(Joi.number()).length(2).optional(),
+    }).optional(),
+    dropoffLocation: Joi.object({
+      address: Joi.string().trim().min(3).max(200).optional(),
+      coordinates: Joi.array().items(Joi.number()).length(2).optional(),
+    }).optional(),
+    packageDetails: Joi.object({
+      weight: Joi.number().min(0).optional(),
+      dimensions: Joi.object({
+        length: Joi.number().min(0).optional(),
+        width: Joi.number().min(0).optional(),
+        height: Joi.number().min(0).optional(),
+      }).optional(),
+      description: Joi.string().trim().max(500).optional(),
+    }).optional(),
+    images: Joi.array().items(fields.objectId).optional(),
+    documents: Joi.array().items(fields.objectId).optional(),
+    pickupTime: Joi.date().iso().optional(),
+    status: fields.objectId.optional(),
   }).min(1),
 };
 
@@ -382,7 +406,7 @@ const driverConnectionSchemas = {
 const fileSchemas = {
   uploadImage: Joi.object({
     type: Joi.string()
-      .valid("profile", "vehicle", "document", "general")
+      .valid("profile", "vehicle", "document", "general", "customer_request")
       .required(),
     category: Joi.string().optional(),
   }),

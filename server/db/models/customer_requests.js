@@ -9,17 +9,11 @@ const customer_requests = new mongoose.Schema(
     },
     pickupLocation: {
       address: { type: String, required: true },
-      coordinates: {
-        type: { type: String, enum: ["Point"], default: "Point" },
-        coordinates: { type: [Number], required: true }, // [lng, lat]
-      },
+      coordinates: { type: [Number], required: true }, // [lng, lat]
     },
     dropoffLocation: {
       address: { type: String, required: true },
-      coordinates: {
-        type: { type: String, enum: ["Point"], default: "Point" },
-        coordinates: { type: [Number], required: true }, // [lng, lat]
-      },
+      coordinates: { type: [Number], required: true }, // [lng, lat]
     },
     packageDetails: {
       weight: { type: Number }, // in kg
@@ -51,11 +45,11 @@ const customer_requests = new mongoose.Schema(
       ref: "customer_request_status",
       default: "684da101412825ef8b404711",
     },
-    matchedTrip: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "trips",
-      required: false,
-    },
+    // matchedTrip: {
+    //   type: mongoose.Schema.Types.ObjectId,
+    //   ref: "trips",
+    //   required: false,
+    // },
   },
   {
     timestamps: true,
@@ -63,7 +57,7 @@ const customer_requests = new mongoose.Schema(
   }
 );
 
-// Indexes for spatial queries
+// Indexes for spatial queries (2dsphere on [lng, lat] arrays)
 customer_requests.index({ "pickupLocation.coordinates": "2dsphere" });
 customer_requests.index({ "dropoffLocation.coordinates": "2dsphere" });
 

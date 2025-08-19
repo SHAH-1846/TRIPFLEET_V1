@@ -9,6 +9,7 @@ const { Types } = require("mongoose");
 const customer_requests = require("../db/models/customer_requests");
 const users = require("../db/models/users");
 const images = require("../db/models/images");
+const customerRequestStatus = require("../db/models/customer_request_status");
 
 // Utils
 const { 
@@ -65,34 +66,57 @@ exports.createRequest = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
-    // Validate attachments if provided
-    if (value.attachments && value.attachments.length > 0) {
-      const validAttachments = await validateImageReferences(value.attachments, userId);
-      if (!validAttachments.isValid) {
-        const response = badRequest("Invalid attachment references", validAttachments.errors);
+    // Validate images/documents if provided
+    if (value.images && value.images.length > 0) {
+      const validImages = await validateImageReferences(value.images, userId);
+      if (!validImages.isValid) {
+        const response = badRequest("Invalid image references", validImages.errors);
+        return res.status(response.statusCode).json(response);
+      }
+    }
+    if (value.documents && value.documents.length > 0) {
+      const validDocs = await validateImageReferences(value.documents, userId);
+      if (!validDocs.isValid) {
+        const response = badRequest("Invalid document references", validDocs.errors);
         return res.status(response.statusCode).json(response);
       }
     }
 
-    // Create customer request with enhanced data
+    // Create customer request aligned with model (coordinates are [lng, lat])
     const requestData = {
-      customer: userId,
-      title: value.title,
-      description: value.description,
-      category: value.category,
-      priority: value.priority,
-      attachments: value.attachments || [],
-      status: 'open',
-      isActive: true
+      user: userId,
+      pickupLocation: {
+        address: value.pickupLocation.address,
+        coordinates: value.pickupLocation.coordinates,
+      },
+      dropoffLocation: {
+        address: value.dropoffLocation.address,
+        coordinates: value.dropoffLocation.coordinates,
+      },
+      packageDetails: value.packageDetails || {},
+      images: value.images || [],
+      documents: value.documents || [],
+      pickupTime: value.pickupTime || null,
+      status: value.status || undefined,
     };
+
+    // Validate status if provided
+    if (requestData.status) {
+      const statusExists = await customerRequestStatus.exists({ _id: requestData.status });
+      if (!statusExists) {
+        const response = badRequest("Invalid status: not found in customer_request_status");
+        return res.status(response.statusCode).json(response);
+      }
+    }
 
     const newRequest = await customer_requests.create(requestData);
 
     // Populate request data for response
     const populatedRequest = await customer_requests.findById(newRequest._id)
-      .populate('customer', 'name email phone')
-      .populate('assignedTo', 'name email phone')
-      .populate('attachments', 'url filename');
+      .populate('user', 'name email phone')
+      .populate('images', 'url filename')
+      .populate('documents', 'url filename')
+      .populate('status', 'name description');
 
     const response = created(
       { request: populatedRequest },
@@ -131,7 +155,7 @@ exports.getAllRequests = async (req, res) => {
     // Filter by user role
     const userType = await require("../db/models/user_types").findById(user.user_type);
     if (userType.name === 'customer') {
-      filter.customer = userId;
+      filter.user = userId;
     } else if (userType.name === 'driver') {
       filter.assignedTo = userId;
     }
@@ -155,9 +179,10 @@ exports.getAllRequests = async (req, res) => {
 
     // Get requests with pagination
     const requestsData = await customer_requests.find(filter)
-      .populate('customer', 'name email phone')
+      .populate('user', 'name email phone')
       .populate('assignedTo', 'name email phone')
-      .populate('attachments', 'url filename')
+      .populate('images', 'url filename')
+      .populate('documents', 'url filename')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -208,9 +233,10 @@ exports.getRequestById = async (req, res) => {
 
     // Get request with populated data
     const request = await customer_requests.findById(requestId)
-      .populate('customer', 'name email phone')
+      .populate('user', 'name email phone')
       .populate('assignedTo', 'name email phone')
-      .populate('attachments', 'url filename');
+      .populate('images', 'url filename')
+      .populate('documents', 'url filename');
 
     if (!request) {
       const response = notFound("Customer request not found");
@@ -219,7 +245,7 @@ exports.getRequestById = async (req, res) => {
 
     // Check access permissions
     const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'customer' && request.customer._id.toString() !== userId) {
+    if (userType.name === 'customer' && request.user._id.toString() !== userId) {
       const response = forbidden("Access denied");
       return res.status(response.statusCode).json(response);
     }
@@ -282,10 +308,9 @@ exports.updateRequest = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
-    // Check if user can update this request
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'customer' && request.customer.toString() !== userId) {
-      const response = forbidden("Access denied");
+    // Only the original creator can update the request
+    if (request.user.toString() !== userId) {
+      const response = forbidden("Only the request creator can update this request");
       return res.status(response.statusCode).json(response);
     }
 
@@ -295,11 +320,31 @@ exports.updateRequest = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
-    // Validate attachments if being updated
-    if (value.attachments && value.attachments.length > 0) {
-      const validAttachments = await validateImageReferences(value.attachments, userId);
-      if (!validAttachments.isValid) {
-        const response = badRequest("Invalid attachment references", validAttachments.errors);
+    // Validate images/documents if being updated
+    if (value.images && value.images.length > 0) {
+      const validImages = await validateImageReferences(value.images, userId);
+      if (!validImages.isValid) {
+        const response = badRequest("Invalid image references", validImages.errors);
+        return res.status(response.statusCode).json(response);
+      }
+    }
+    if (value.documents && value.documents.length > 0) {
+      const validDocs = await validateImageReferences(value.documents, userId);
+      if (!validDocs.isValid) {
+        const response = badRequest("Invalid document references", validDocs.errors);
+        return res.status(response.statusCode).json(response);
+      }
+    }
+
+    // Validate provided status id (if included)
+    if (value.status) {
+      if (!Types.ObjectId.isValid(value.status)) {
+        const response = badRequest("Invalid status id format");
+        return res.status(response.statusCode).json(response);
+      }
+      const statusExists = await customerRequestStatus.exists({ _id: value.status });
+      if (!statusExists) {
+        const response = badRequest("Invalid status: not found in customer_request_status");
         return res.status(response.statusCode).json(response);
       }
     }
@@ -313,9 +358,10 @@ exports.updateRequest = async (req, res) => {
       },
       { new: true }
     )
-    .populate('customer', 'name email phone')
-    .populate('assignedTo', 'name email phone')
-    .populate('attachments', 'url filename');
+    .populate('user', 'name email phone')
+    .populate('status', 'name description')
+    .populate('images', 'filename url')
+    .populate('documents', 'filename url');
 
     const response = updated(
       { request: updatedRequest },
@@ -430,7 +476,7 @@ exports.updateRequestStatus = async (req, res) => {
 
     // Check if user can update this request
     const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'customer' && request.customer.toString() !== userId) {
+    if (userType.name === 'customer' && request.user.toString() !== userId) {
       const response = forbidden("Access denied");
       return res.status(response.statusCode).json(response);
     }
@@ -440,10 +486,14 @@ exports.updateRequestStatus = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
-    // Validate status transition
-    const validStatuses = ['open', 'in_progress', 'resolved', 'closed'];
-    if (!validStatuses.includes(status)) {
-      const response = badRequest("Invalid status");
+    // Validate status id exists in customer_request_status collection
+    if (!Types.ObjectId.isValid(status)) {
+      const response = badRequest("Invalid status id format");
+      return res.status(response.statusCode).json(response);
+    }
+    const statusExists = await customerRequestStatus.exists({ _id: status });
+    if (!statusExists) {
+      const response = badRequest("Invalid status: not found in customer_request_status");
       return res.status(response.statusCode).json(response);
     }
 
