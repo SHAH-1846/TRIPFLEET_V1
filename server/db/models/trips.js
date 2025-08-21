@@ -1,7 +1,30 @@
 const mongoose = require("mongoose");
 
+const locationSchema = new mongoose.Schema({
+  type: { type: String, enum: ["Point"], default: "Point" },
+  address: { type: String, trim: true },
+  coordinates: {
+    type: [Number], // [lng, lat]
+    required: true,
+  },
+});
+
+locationSchema.index({ coordinates: "2dsphere" });
+
 const trips = new mongoose.Schema(
   {
+
+    title: {
+      type: String,
+      trim: true,
+      required: true,
+    },
+
+    description: {
+      type: String,
+      trim: true,
+    },
+
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "users",
@@ -29,28 +52,11 @@ const trips = new mongoose.Schema(
       required: true,
     },
 
-    tripStartLocation: {
-      address: String,
-      coordinates: {
-        type: [Number], // [lng, lat]
-        required: true
-      },
-    },
+    tripStartLocation: locationSchema,
 
-    tripDestination: {
-      address: String,
-      coordinates: {
-        type: [Number], // [lng, lat]
-        required: true
-      },
-    },
+    tripDestination: locationSchema,
 
-    // routeCoordinates: [
-    //   {
-    //     lat: Number,
-    //     lng: Number,
-    //   },
-    // ],
+    viaRoutes: [locationSchema], //array of waypoints
 
     routeGeoJSON: {
       type: {
@@ -78,7 +84,7 @@ const trips = new mongoose.Schema(
       default: false,
     },
 
-    isActive : {
+    isActive: {
       type: Boolean,
       default: true,
     },
@@ -96,7 +102,7 @@ const trips = new mongoose.Schema(
       type: { type: String, default: "Point" },
       coordinates: [Number], //[lng, lat]
     },
-    
+
     lastUpdated: Date,
     tripDate: Date,
     startTime: String,

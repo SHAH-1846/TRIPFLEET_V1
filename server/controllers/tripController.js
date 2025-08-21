@@ -263,23 +263,31 @@ exports.createTrip = async (req, res) => {
 
     console.log("Final routeGeoJSONCoordinates:", routeGeoJSONCoordinates);
 
+    // ✅ Map viaRoutes safely
+    let viaRoutes = [];
+    if (Array.isArray(value.viaRoutes) && value.viaRoutes.length > 0) {
+      viaRoutes = value.viaRoutes.map(via => ({
+        name: via.name || null,
+        coordinates: {
+          type: "Point",
+          coordinates: [via.coordinates.lng, via.coordinates.lat]
+        }
+      }));
+    }
+
     const tripData = {
-      customer: userId,
+      description: value.description,
+      title: value.title,
       tripAddedBy: userId, // The user creating the trip
       tripStartLocation: {
-        address: value.tripStartLocation.address,
-        coordinates: [
-          value.tripStartLocation.coordinates.lng,
-          value.tripStartLocation.coordinates.lat
-        ]
+        address: value.pickupLocation.address,
+        coordinates: value.pickupLocation.coordinates,
       },
       tripDestination: {
-        address: value.tripDestination.address,
-        coordinates: [
-          value.tripDestination.coordinates.lng,
-          value.tripDestination.coordinates.lat
-        ]
+        address: value.pickupLocation.address,
+        coordinates: value.pickupLocation.coordinates,
       },
+      viaRoutes: viaRoutes,
       goodsType: value.goodsType,
       weight: value.weight,
       description: value.description,
@@ -336,12 +344,12 @@ exports.createTrip = async (req, res) => {
 exports.getAllTrips = async (req, res) => {
   try {
     const userId = req.user.user_id;
-    const { 
-      page = 1, 
-      limit = 10, 
-      status, 
-      search, 
-      dateFrom, 
+    const {
+      page = 1,
+      limit = 10,
+      status,
+      search,
+      dateFrom,
       dateTo,
       currentLocation,
       pickupLocation,
@@ -387,15 +395,15 @@ exports.getAllTrips = async (req, res) => {
     console.log("pickupLocation", pickupLocation);
     console.log("dropoffLocation", dropoffLocation);
     console.log("pickupDropoffBoth", pickupDropoffBoth);
-    
+
     // Helper function to calculate distance between two points in meters
     const getDistanceFromLatLonInMeters = (lat1, lon1, lat2, lon2) => {
       const R = 6371; // Radius of the earth in km
       const dLat = (lat2 - lat1) * Math.PI / 180;
       const dLon = (lon2 - lon1) * Math.PI / 180;
       const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
       const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
       const distance = R * c; // Distance in km
       return distance * 1000; // Convert to meters
@@ -511,7 +519,7 @@ exports.getAllTrips = async (req, res) => {
           if (!trip.routeGeoJSON || !trip.routeGeoJSON.coordinates) {
             return false;
           }
-          
+
           // Check if any route coordinate is within radius of dropoff location
           return trip.routeGeoJSON.coordinates.some((coord) => {
             const [lng, lat] = coord;
@@ -528,7 +536,7 @@ exports.getAllTrips = async (req, res) => {
       } else {
         tripsData = pickupNearbyTrips;
       }
-      
+
       // Get total count for pagination
       total = await trips.countDocuments({
         routeGeoJSON: { $geoIntersects: { $geometry: pickupCircle } },
@@ -639,11 +647,11 @@ exports.getTripById = async (req, res) => {
 
     // Get trip with populated data
     const trip = await trips.findById(tripId)
-    .populate('tripAddedBy', 'name email phone')
-    .populate('driver', 'name email phone')
-    .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
-    .populate('goodsType', 'name description')
-    .populate('status', 'name description');
+      .populate('tripAddedBy', 'name email phone')
+      .populate('driver', 'name email phone')
+      .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
+      .populate('goodsType', 'name description')
+      .populate('status', 'name description');
 
     if (!trip) {
       const response = notFound("Trip not found");
@@ -1148,6 +1156,95 @@ exports.getTripStats = async (req, res) => {
   } catch (error) {
     console.error("Get trip stats error:", error);
     const response = serverError("Failed to retrieve trip statistics");
+    return res.status(response.statusCode).json(response);
+  }
+};
+
+/**
+ * Update trip status
+ * @route PUT /api/v1/trips/:tripId/status
+ */
+exports.updateTripStatus = async (req, res) => {
+  try {
+    const { tripId } = req.params;
+    const userId = req.user.user_id;
+
+    // Validate request
+    const { error, value } = tripSchemas.updateStatus.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true,
+    });
+    if (error) {
+      const errors = error.details.map((detail) => ({
+        field: detail.path.join('.'),
+        message: detail.message,
+      }));
+      const response = badRequest('Validation failed', errors);
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Validate user
+    const user = await users.findById(userId);
+    if (!user || !user.isActive) {
+      const response = unauthorized('User not found or inactive');
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Fetch trip
+    const trip = await trips.findById(tripId);
+    if (!trip) {
+      const response = notFound('Trip not found');
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Permission: creator or assigned driver can update status
+    const userType = await require("../db/models/user_types").findById(user.user_type);
+    const isCreator = trip.tripAddedBy?.toString() === userId;
+    const isAssignedDriver = trip.driver?.toString() === userId;
+    if (!(isCreator || isAssignedDriver || userType.name === 'admin')) {
+      const response = forbidden('Access denied');
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Validate status exists in trip_status collection
+    const TripStatus = require('../db/models/trip_status');
+    const statusDoc = await TripStatus.findById(value.status);
+    if (!statusDoc) {
+      const response = badRequest('Invalid status: not found in trip_status');
+      return res.status(response.statusCode).json(response);
+    }
+
+    const updateData = {
+      status: value.status,
+      updatedAt: new Date(),
+    };
+
+    // Set timestamps based on status name
+    if (statusDoc.name === 'started') {
+      updateData.actualStartTime = new Date();
+      updateData.isStarted = true;
+    }
+    if (statusDoc.name === 'completed') {
+      updateData.actualEndTime = new Date();
+    }
+
+    if (value.notes) {
+      updateData.statusNotes = value.notes;
+    }
+
+    const updatedTrip = await trips
+      .findByIdAndUpdate(tripId, updateData, { new: true })
+      .populate('tripAddedBy', 'name email phone')
+      .populate('driver', 'name email phone')
+      .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
+      .populate('goodsType', 'name description')
+      .populate('status', 'name description');
+
+    const response = updated({ trip: updatedTrip }, 'Trip status updated successfully');
+    return res.status(response.statusCode).json(response);
+  } catch (error) {
+    console.error('Update trip status error:', error);
+    const response = serverError('Failed to update trip status');
     return res.status(response.statusCode).json(response);
   }
 };

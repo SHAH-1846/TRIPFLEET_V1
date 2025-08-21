@@ -192,26 +192,26 @@ const vehicleSchemas = {
 // Trip Schemas
 const tripSchemas = {
   createTrip: Joi.object({
+    title: Joi.string().trim().min(5).max(200).required(),
+    description: Joi.string().trim().max(500).optional(),
     tripStartLocation: Joi.object({
-      address: Joi.string().trim().min(5).max(200).required(),
-      coordinates: Joi.object({
-        lat: Joi.number().min(-90).max(90).required(),
-        lng: Joi.number().min(-180).max(180).required(),
-      }).required(),
+      address: Joi.string().trim().min(3).max(200).required(),
+      coordinates: Joi.array().items(Joi.number()).length(2).required() // [lng, lat]).required(),
     }).required(),
     tripDestination: Joi.object({
-      address: Joi.string().trim().min(5).max(200).required(),
-      coordinates: Joi.object({
-        lat: Joi.number().min(-90).max(90).required(),
-        lng: Joi.number().min(-180).max(180).required(),
-      }).required(),
+      address: Joi.string().trim().min(3).max(200).required(),
+      coordinates: Joi.array().items(Joi.number()).length(2).required() // [lng, lat]).required(),
     }).required(),
     routeGeoJSON: Joi.object({
       type: Joi.string().valid("LineString").default("LineString"),
       coordinates: Joi.array().items(
         Joi.array().items(Joi.number()).length(2)
-      ).min(2).optional(),
-    }).optional(),
+      ).min(2).required(),
+    }).required(),
+    viaRoutes: Joi.array().items(Joi.object({
+      address: Joi.string().trim().max(200).required(),
+      coordinates: Joi.array().items(Joi.number()).length(2).required(),
+    })).required(),
     distance: Joi.object({
       value: Joi.number().min(0).required(),
       text: Joi.string().trim().max(50).required(),
@@ -286,6 +286,11 @@ const tripSchemas = {
       'date.greater': 'tripEndDate must be after tripStartDate'
     }),
   }).min(1),
+
+  updateStatus: Joi.object({
+    status: fields.objectId,
+    notes: Joi.string().trim().max(500).optional(),
+  })
 };
 
 // Booking Schemas
@@ -319,6 +324,14 @@ const customerRequestSchemas = {
       address: Joi.string().trim().min(3).max(200).required(),
       coordinates: Joi.array().items(Joi.number()).length(2).required() // [lng, lat]
     }).required(),
+    distance: Joi.object({
+      value: Joi.number().min(0).required(),
+      text: Joi.string().trim().max(50).required(),
+    }).required(),
+    duration: Joi.object({
+      value: Joi.number().min(0).required(),
+      text: Joi.string().trim().max(50).required(),
+    }).required(),
     packageDetails: Joi.object({
       weight: Joi.number().min(0).optional(),
       dimensions: Joi.object({
@@ -342,6 +355,14 @@ const customerRequestSchemas = {
     dropoffLocation: Joi.object({
       address: Joi.string().trim().min(3).max(200).optional(),
       coordinates: Joi.array().items(Joi.number()).length(2).optional(),
+    }).optional(),
+    distance: Joi.object({
+      value: Joi.number().min(0).optional(),
+      text: Joi.string().trim().max(50).optional(),
+    }).optional(),
+    duration: Joi.object({
+      value: Joi.number().min(0).optional(),
+      text: Joi.string().trim().max(50).optional(),
     }).optional(),
     packageDetails: Joi.object({
       weight: Joi.number().min(0).optional(),

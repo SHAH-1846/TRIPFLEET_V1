@@ -15,6 +15,14 @@ const customer_requests = new mongoose.Schema(
       address: { type: String, required: true },
       coordinates: { type: [Number], required: true }, // [lng, lat]
     },
+    distance: {
+      value: Number, // in meters
+      text: String, // readable, e.g., "120 km"
+    },
+    duration: {
+      value: Number, // in seconds
+      text: String, // e.g., "2 hours 15 mins"
+    },
     packageDetails: {
       weight: { type: Number }, // in kg
       dimensions: {
@@ -44,6 +52,10 @@ const customer_requests = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "customer_request_status",
       default: "684da101412825ef8b404711",
+    },
+    isActive: {
+      type: Boolean,
+      default: true,
     },
     // matchedTrip: {
     //   type: mongoose.Schema.Types.ObjectId,

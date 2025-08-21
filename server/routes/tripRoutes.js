@@ -115,6 +115,19 @@ router.put('/:tripId/complete',
 );
 
 /**
+ * @route PUT /api/v1/trips/:tripId/status
+ * @desc Update trip status
+ * @access Private (trip owner, assigned driver, or admin)
+ */
+router.put('/:tripId/status',
+  authenticateToken,
+  validateObjectId('tripId'),
+  sanitizeInput,
+  validateRequest(tripSchemas.updateStatus),
+  tripController.updateTripStatus
+);
+
+/**
  * @route DELETE /api/v1/trips/:tripId
  * @desc Delete trip (soft delete)
  * @access Private (trip owner or admin)
