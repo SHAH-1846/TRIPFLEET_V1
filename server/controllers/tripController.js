@@ -198,14 +198,14 @@ exports.createTrip = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
-    // Validate coordinates format
-    if (!value.tripStartLocation.coordinates || !value.tripStartLocation.coordinates.lat || !value.tripStartLocation.coordinates.lng) {
-      const response = badRequest("Invalid trip start location coordinates");
+    // Validate coordinates format - now expecting [lng, lat] arrays
+    if (!value.tripStartLocation.coordinates || !Array.isArray(value.tripStartLocation.coordinates) || value.tripStartLocation.coordinates.length !== 2) {
+      const response = badRequest("Invalid trip start location coordinates. Expected [lng, lat] array");
       return res.status(response.statusCode).json(response);
     }
 
-    if (!value.tripDestination.coordinates || !value.tripDestination.coordinates.lat || !value.tripDestination.coordinates.lng) {
-      const response = badRequest("Invalid trip destination coordinates");
+    if (!value.tripDestination.coordinates || !Array.isArray(value.tripDestination.coordinates) || value.tripDestination.coordinates.length !== 2) {
+      const response = badRequest("Invalid trip destination coordinates. Expected [lng, lat] array");
       return res.status(response.statusCode).json(response);
     }
 
@@ -256,60 +256,54 @@ exports.createTrip = async (req, res) => {
     } else {
       console.log("Using fallback routeGeoJSON coordinates (start to end only)");
       routeGeoJSONCoordinates = [
-        [value.tripStartLocation.coordinates.lng, value.tripStartLocation.coordinates.lat],
-        [value.tripDestination.coordinates.lng, value.tripDestination.coordinates.lat]
+        value.tripStartLocation.coordinates, // Already in [lng, lat] format
+        value.tripDestination.coordinates   // Already in [lng, lat] format
       ];
     }
 
     console.log("Final routeGeoJSONCoordinates:", routeGeoJSONCoordinates);
 
-    // ✅ Map viaRoutes safely
+    // ✅ Map viaRoutes safely - now expecting [lng, lat] arrays
     let viaRoutes = [];
     if (Array.isArray(value.viaRoutes) && value.viaRoutes.length > 0) {
       viaRoutes = value.viaRoutes.map(via => ({
-        name: via.name || null,
-        coordinates: {
-          type: "Point",
-          coordinates: [via.coordinates.lng, via.coordinates.lat]
-        }
+        address: via.address,
+        coordinates: via.coordinates // Already in [lng, lat] format - matches locationSchema
       }));
     }
 
     const tripData = {
-      description: value.description,
       title: value.title,
+      description: value.description,
       tripAddedBy: userId, // The user creating the trip
       tripStartLocation: {
-        address: value.pickupLocation.address,
-        coordinates: value.pickupLocation.coordinates,
+        address: value.tripStartLocation.address,
+        coordinates: value.tripStartLocation.coordinates, // Already in [lng, lat] format
       },
       tripDestination: {
-        address: value.pickupLocation.address,
-        coordinates: value.pickupLocation.coordinates,
+        address: value.tripDestination.address,
+        coordinates: value.tripDestination.coordinates, // Already in [lng, lat] format
       },
       viaRoutes: viaRoutes,
       goodsType: value.goodsType,
       weight: value.weight,
-      description: value.description,
       tripStartDate: tripStartDate,
       tripEndDate: tripEndDate,
       isActive: true,
       currentLocation: {
         type: "Point",
-        coordinates: [
-          value.tripStartLocation.coordinates.lng,
-          value.tripStartLocation.coordinates.lat
-        ]
+        coordinates: value.tripStartLocation.coordinates // Already in [lng, lat] format - matches locationSchema
       },
       routeGeoJSON: {
         type: "LineString",
         coordinates: routeGeoJSONCoordinates
       },
+      vehicle: value.vehicle,
+      driver: value.driver,
+      selfDrive: value.selfDrive,
       // Add optional fields if provided
       ...(value.distance && { distance: value.distance }),
-      ...(value.duration && { duration: value.duration }),
-      ...(value.vehicle && { vehicle: value.vehicle }),
-      ...(value.driver && { driver: value.driver })
+      ...(value.duration && { duration: value.duration })
     };
     console.log("tripData", tripData);
 
@@ -704,72 +698,77 @@ exports.updateTrip = async (req, res) => {
     const { tripId } = req.params;
     const userId = req.user.user_id;
 
-    // Convert coordinates from {lat, lng} format to [lng, lat] array format if needed
+    // Validate and process update data
     let updateData = { ...req.body };
 
+    // Validate coordinates format if provided - now expecting [lng, lat] arrays
     if (updateData.tripStartLocation && updateData.tripStartLocation.coordinates) {
-      console.log('Original tripStartLocation coordinates:', updateData.tripStartLocation.coordinates);
-      if (typeof updateData.tripStartLocation.coordinates === 'object' &&
-        updateData.tripStartLocation.coordinates.lat !== undefined &&
-        updateData.tripStartLocation.coordinates.lng !== undefined) {
-        // Validate coordinate values
-        const lng = parseFloat(updateData.tripStartLocation.coordinates.lng);
-        const lat = parseFloat(updateData.tripStartLocation.coordinates.lat);
+      if (!Array.isArray(updateData.tripStartLocation.coordinates) || updateData.tripStartLocation.coordinates.length !== 2) {
+        const response = badRequest("Invalid trip start location coordinates. Expected [lng, lat] array");
+        return res.status(response.statusCode).json(response);
+      }
+      
+      // Validate coordinate values
+      const [lng, lat] = updateData.tripStartLocation.coordinates;
+      if (isNaN(lng) || isNaN(lat)) {
+        const response = badRequest("Invalid coordinate values: longitude and latitude must be valid numbers");
+        return res.status(response.statusCode).json(response);
+      }
 
-        if (isNaN(lng) || isNaN(lat)) {
-          const response = badRequest("Invalid coordinate values: longitude and latitude must be valid numbers");
-          return res.status(response.statusCode).json(response);
-        }
+      if (lng < -180 || lng > 180) {
+        const response = badRequest("Longitude must be between -180 and 180 degrees");
+        return res.status(response.statusCode).json(response);
+      }
 
-        if (lng < -180 || lng > 180) {
-          const response = badRequest("Longitude must be between -180 and 180 degrees");
-          return res.status(response.statusCode).json(response);
-        }
-
-        if (lat < -90 || lat > 90) {
-          const response = badRequest("Latitude must be between -90 and 90 degrees");
-          return res.status(response.statusCode).json(response);
-        }
-
-        // Convert from {lat, lng} to [lng, lat] format (GeoJSON standard)
-        updateData.tripStartLocation.coordinates = [lng, lat];
-        console.log('Converted tripStartLocation coordinates:', updateData.tripStartLocation.coordinates);
+      if (lat < -90 || lat > 90) {
+        const response = badRequest("Latitude must be between -90 and 90 degrees");
+        return res.status(response.statusCode).json(response);
       }
     }
 
     if (updateData.tripDestination && updateData.tripDestination.coordinates) {
-      console.log('Original tripDestination coordinates:', updateData.tripDestination.coordinates);
-      if (typeof updateData.tripDestination.coordinates === 'object' &&
-        updateData.tripDestination.coordinates.lat !== undefined &&
-        updateData.tripDestination.coordinates.lng !== undefined) {
-        // Validate coordinate values
-        const lng = parseFloat(updateData.tripDestination.coordinates.lng);
-        const lat = parseFloat(updateData.tripDestination.coordinates.lat);
+      if (!Array.isArray(updateData.tripDestination.coordinates) || updateData.tripDestination.coordinates.length !== 2) {
+        const response = badRequest("Invalid trip destination coordinates. Expected [lng, lat] array");
+        return res.status(response.statusCode).json(response);
+      }
+      
+      // Validate coordinate values
+      const [lng, lat] = updateData.tripDestination.coordinates;
+      if (isNaN(lng) || isNaN(lat)) {
+        const response = badRequest("Invalid coordinate values: longitude and latitude must be valid numbers");
+        return res.status(response.statusCode).json(response);
+      }
 
-        if (isNaN(lng) || isNaN(lat)) {
-          const response = badRequest("Invalid coordinate values: longitude and latitude must be valid numbers");
+      if (lng < -180 || lng > 180) {
+        const response = badRequest("Longitude must be between -180 and 180 degrees");
+        return res.status(response.statusCode).json(response);
+      }
+
+      if (lat < -90 || lat > 90) {
+        const response = badRequest("Latitude must be between -90 and 90 degrees");
+        return res.status(response.statusCode).json(response);
+      }
+    }
+
+    // Validate viaRoutes if provided
+    if (updateData.viaRoutes && Array.isArray(updateData.viaRoutes)) {
+      for (const via of updateData.viaRoutes) {
+        if (!via.address || !Array.isArray(via.coordinates) || via.coordinates.length !== 2) {
+          const response = badRequest("Invalid via route. Each via route must have address and coordinates as [lng, lat] array");
           return res.status(response.statusCode).json(response);
         }
-
-        if (lng < -180 || lng > 180) {
-          const response = badRequest("Longitude must be between -180 and 180 degrees");
+        
+        const [lng, lat] = via.coordinates;
+        if (isNaN(lng) || isNaN(lat) || lng < -180 || lng > 180 || lat < -90 || lat > 90) {
+          const response = badRequest("Invalid via route coordinates. Longitude must be between -180 and 180, latitude between -90 and 90");
           return res.status(response.statusCode).json(response);
         }
-
-        if (lat < -90 || lat > 90) {
-          const response = badRequest("Latitude must be between -90 and 90 degrees");
-          return res.status(response.statusCode).json(response);
-        }
-
-        // Convert from {lat, lng} to [lng, lat] format (GeoJSON standard)
-        updateData.tripDestination.coordinates = [lng, lat];
-        console.log('Converted tripDestination coordinates:', updateData.tripDestination.coordinates);
       }
     }
 
     console.log('Final updateData for validation:', JSON.stringify(updateData, null, 2));
 
-    // Use the converted data directly (no validation needed since we're doing manual conversion)
+    // Use the validated data
     const value = updateData;
 
     // Check if user exists and is active

@@ -46,6 +46,11 @@ const trips = new mongoose.Schema(
       ref: "users",
     },
 
+    selfDrive: {
+      type: Boolean,
+      default: false,
+    },
+
     goodsType: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'goods_accepted',

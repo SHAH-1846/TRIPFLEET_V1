@@ -193,25 +193,34 @@ const vehicleSchemas = {
 const tripSchemas = {
   createTrip: Joi.object({
     title: Joi.string().trim().min(5).max(200).required(),
-    description: Joi.string().trim().max(500).optional(),
+    description: Joi.string().trim().max(500).required(),
     tripStartLocation: Joi.object({
       address: Joi.string().trim().min(3).max(200).required(),
-      coordinates: Joi.array().items(Joi.number()).length(2).required() // [lng, lat]).required(),
+      coordinates: Joi.array().items(Joi.number()).length(2).required(), // [lng, lat]
     }).required(),
     tripDestination: Joi.object({
       address: Joi.string().trim().min(3).max(200).required(),
-      coordinates: Joi.array().items(Joi.number()).length(2).required() // [lng, lat]).required(),
+      coordinates: Joi.array().items(Joi.number()).length(2).required(), // [lng, lat]
     }).required(),
+    viaRoutes: Joi.array().items(Joi.object({
+      address: Joi.string().trim().max(200).required(),
+      coordinates: Joi.array().items(Joi.number()).length(2).required(), // [lng, lat]
+    })).optional(),
     routeGeoJSON: Joi.object({
       type: Joi.string().valid("LineString").default("LineString"),
       coordinates: Joi.array().items(
         Joi.array().items(Joi.number()).length(2)
       ).min(2).required(),
     }).required(),
-    viaRoutes: Joi.array().items(Joi.object({
-      address: Joi.string().trim().max(200).required(),
-      coordinates: Joi.array().items(Joi.number()).length(2).required(),
-    })).required(),
+    vehicle: fields.objectId.required().messages({
+      'any.required': 'Vehicle is required for the trip'
+    }),
+    selfDrive: Joi.boolean().required().messages({
+      'any.required': 'selfDrive field is required to indicate if the current user is driving'
+    }),
+    driver: fields.objectId.required().messages({
+      'any.required': 'Driver is required for the trip'
+    }),
     distance: Joi.object({
       value: Joi.number().min(0).required(),
       text: Joi.string().trim().max(50).required(),
@@ -220,18 +229,10 @@ const tripSchemas = {
       value: Joi.number().min(0).required(),
       text: Joi.string().trim().max(50).required(),
     }).optional(),
-    vehicle: fields.objectId.required().messages({
-      'any.required': 'Vehicle is required for the trip'
+    goodsType: fields.objectId.required().messages({
+      'any.required': 'Goods type is required for the trip'
     }),
-    driver: fields.objectId.required().messages({
-      'any.required': 'Driver is required for the trip'
-    }),
-    selfDrive: Joi.boolean().required().messages({
-      'any.required': 'selfDrive field is required to indicate if the current user is driving'
-    }),
-    goodsType: fields.objectId,
     weight: Joi.number().min(0.1).max(100).optional(),
-    description: Joi.string().trim().max(500).optional(),
     tripStartDate: Joi.date().iso().min('now').required().messages({
       'date.base': 'tripStartDate must be a valid ISO date-time string',
       'any.required': 'tripStartDate is required'
@@ -244,26 +245,29 @@ const tripSchemas = {
   }),
 
   updateTrip: Joi.object({
+    title: Joi.string().trim().min(5).max(200).optional(),
+    description: Joi.string().trim().max(500).optional(),
     tripStartLocation: Joi.object({
-      address: Joi.string().trim().min(5).max(200).optional(),
-      coordinates: Joi.object({
-        lat: Joi.number().min(-90).max(90).optional(),
-        lng: Joi.number().min(-180).max(180).optional(),
-      }).optional(),
+      address: Joi.string().trim().min(3).max(200).optional(),
+      coordinates: Joi.array().items(Joi.number()).length(2).optional(), // [lng, lat]
     }).optional(),
     tripDestination: Joi.object({
-      address: Joi.string().trim().min(5).max(200).optional(),
-      coordinates: Joi.object({
-        lat: Joi.number().min(-90).max(180).optional(),
-        lng: Joi.number().min(-180).max(180).optional(),
-      }).optional(),
+      address: Joi.string().trim().min(3).max(200).optional(),
+      coordinates: Joi.array().items(Joi.number()).length(2).optional(), // [lng, lat]
     }).optional(),
+    viaRoutes: Joi.array().items(Joi.object({
+      address: Joi.string().trim().max(200).required(),
+      coordinates: Joi.array().items(Joi.number()).length(2).required(), // [lng, lat]
+    })).optional(),
     routeGeoJSON: Joi.object({
       type: Joi.string().valid("LineString").default("LineString"),
       coordinates: Joi.array().items(
         Joi.array().items(Joi.number()).length(2)
       ).min(2).optional(),
     }).optional(),
+    vehicle: fields.objectId.optional(),
+    selfDrive: Joi.boolean().optional(),
+    driver: fields.objectId.optional(),
     distance: Joi.object({
       value: Joi.number().min(0).optional(),
       text: Joi.string().trim().max(50).optional(),
@@ -272,12 +276,8 @@ const tripSchemas = {
       value: Joi.number().min(0).optional(),
       text: Joi.string().trim().max(50).optional(),
     }).optional(),
-    vehicle: fields.objectId.optional(),
-    driver: fields.objectId.optional(),
-    selfDrive: Joi.boolean().optional(),
     goodsType: fields.objectId.optional(),
     weight: Joi.number().min(0.1).max(100).optional(),
-    description: Joi.string().trim().max(500).optional(),
     tripStartDate: Joi.date().iso().min('now').optional().messages({
       'date.base': 'tripStartDate must be a valid ISO date-time string'
     }),
