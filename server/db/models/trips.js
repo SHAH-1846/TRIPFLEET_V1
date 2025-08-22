@@ -141,5 +141,6 @@ trips.index({ routeGeoJSON: "2dsphere" });
 //Add 2dsphere indexes for location coordinates
 trips.index({ "tripStartLocation.coordinates": "2dsphere" });
 trips.index({ "tripDestination.coordinates": "2dsphere" });
+trips.index({ "viaRoutes.coordinates": "2dsphere" });
 trips.index({ "currentLocation.coordinates": "2dsphere" });
 module.exports = mongoose.model("trips", trips);

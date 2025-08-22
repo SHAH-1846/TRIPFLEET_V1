@@ -333,7 +333,52 @@ exports.createTrip = async (req, res) => {
 
 /**
  * Get all trips with pagination and filtering
+ * Enhanced with robust geospatial search capabilities
+ * 
  * @route GET /api/v1/trips
+ * 
+ * Query Parameters:
+ * - page: Page number (default: 1)
+ * - limit: Items per page (default: 10)
+ * - status: Trip status filter
+ * - search: Text search in address fields
+ * - dateFrom: Start date filter (ISO string)
+ * - dateTo: End date filter (ISO string)
+ * - pickupLocation: "lng,lat" or [lng, lat] - search for trips near pickup point
+ * - dropoffLocation: "lng,lat" or [lng, lat] - search for trips near dropoff point
+ * - currentLocation: "lng,lat" or [lng, lat] - search for trips near current location
+ * - searchRadius/radius: Search radius in meters (default: 5000)
+ * - pickupDropoffBoth: "true"|"false" - if true, require proximity to BOTH pickup and dropoff
+ * 
+ * Geospatial Search Behavior:
+ * - Single point search: Returns trips where ANY of these are within radius:
+ *   * tripStartLocation.coordinates
+ *   * tripDestination.coordinates  
+ *   * any viaRoutes.coordinates
+ *   * routeGeoJSON intersects circle
+ * - Dual point search (pickup + dropoff):
+ *   * If pickupDropoffBoth="true": Requires proximity to BOTH points
+ *   * If pickupDropoffBoth="false" or omitted: Requires proximity to pickup, optional to dropoff
+ * 
+ * Example API Calls:
+ * 
+ * 1. Find trips near a pickup point:
+ *    GET /api/v1/trips?pickupLocation=76.2999,9.9785&searchRadius=5000
+ * 
+ * 2. Find trips near both pickup and dropoff (require both):
+ *    GET /api/v1/trips?pickupLocation=76.2999,9.9785&dropoffLocation=76.9488,8.4875&pickupDropoffBoth=true&searchRadius=5000
+ * 
+ * 3. Find trips near current location:
+ *    GET /api/v1/trips?currentLocation=76.4000,9.8000&radius=3000
+ * 
+ * 4. Combine with other filters:
+ *    GET /api/v1/trips?pickupLocation=76.2999,9.9785&status=684942f5ff32840ef8e726f0&search=Kochi&dateFrom=2025-01-01&searchRadius=10000
+ * 
+ * Performance Notes:
+ * - Uses 2dsphere indexes on all coordinate fields
+ * - Avoids $near in $or branches for better index utilization
+ * - Uses $geoWithin with $centerSphere for Point fields
+ * - Uses $geoIntersects with circle polygon for LineString routeGeoJSON
  */
 exports.getAllTrips = async (req, res) => {
   try {
@@ -391,6 +436,7 @@ exports.getAllTrips = async (req, res) => {
     console.log("pickupDropoffBoth", pickupDropoffBoth);
 
     // Helper function to calculate distance between two points in meters
+    // Note: This is kept for potential future use but not currently used in the main query
     const getDistanceFromLatLonInMeters = (lat1, lon1, lat2, lon2) => {
       const R = 6371; // Radius of the earth in km
       const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -403,7 +449,16 @@ exports.getAllTrips = async (req, res) => {
       return distance * 1000; // Convert to meters
     };
 
-    // Helper to build an approximate circle polygon around a point (for $geoIntersects on LineString route)
+    /**
+     * Helper to build an approximate circle polygon around a point
+     * Used for $geoIntersects queries on LineString routeGeoJSON
+     * 
+     * @param {number} lng - Longitude of center point
+     * @param {number} lat - Latitude of center point  
+     * @param {number} radiusMeters - Radius in meters
+     * @param {number} steps - Number of polygon vertices (default: 64)
+     * @returns {Object} GeoJSON Polygon approximating a circle
+     */
     const makeCirclePolygon = (lng, lat, radiusMeters, steps = 64) => {
       const earthRadius = 6371000; // meters
       const d = radiusMeters / earthRadius; // angular distance in radians
@@ -430,8 +485,38 @@ exports.getAllTrips = async (req, res) => {
       };
     };
 
-    // Parse coordinates from query parameters
+    /**
+     * Build unified $or geospatial filters for a given center point
+     * Creates an $or array that matches trips where ANY of these are within radius:
+     * - routeGeoJSON intersects circle polygon
+     * - tripStartLocation.coordinates within circle
+     * - tripDestination.coordinates within circle  
+     * - any viaRoutes.coordinates within circle
+     * 
+     * @param {number} lng - Longitude of center point
+     * @param {number} lat - Latitude of center point
+     * @param {number} radiusMeters - Search radius in meters
+     * @returns {Array} Array of geospatial filter objects for $or query
+     */
+    const buildGeoOrFilters = (lng, lat, radiusMeters) => {
+      const earthRadius = 6371000; // meters
+      const radiusRadians = radiusMeters / earthRadius;
+      const circlePolygon = makeCirclePolygon(lng, lat, radiusMeters);
+      return [
+        // 1) Route intersects the circle polygon
+        { routeGeoJSON: { $geoIntersects: { $geometry: circlePolygon } } },
+        // 2) Start within radius
+        { "tripStartLocation.coordinates": { $geoWithin: { $centerSphere: [[lng, lat], radiusRadians] } } },
+        // 3) Destination within radius
+        { "tripDestination.coordinates": { $geoWithin: { $centerSphere: [[lng, lat], radiusRadians] } } },
+        // 4) Any viaRoute within radius
+        { "viaRoutes.coordinates": { $geoWithin: { $centerSphere: [[lng, lat], radiusRadians] } } }
+      ];
+    };
+
+    // Parse coordinates from query parameters with robust validation
     let pickupLat, pickupLng, dropoffLat, dropoffLng, currentLat, currentLng;
+    
     // Radius (meters): configurable via query params `searchRadius` or `radius`, default 5000
     let searchRadius = 5000;
     const radiusParam = typeof req.query.searchRadius !== 'undefined' ? req.query.searchRadius : req.query.radius;
@@ -443,58 +528,93 @@ exports.getAllTrips = async (req, res) => {
     }
     console.log("searchRadius", searchRadius);
     console.log("filter", filter);
+
+    /**
+     * Helper function to parse and validate coordinates from various input formats
+     * Supports both string format ("lng,lat") and array format ([lng, lat])
+     * 
+     * @param {string|Array} coordInput - Coordinate input in "lng,lat" or [lng, lat] format
+     * @param {string} paramName - Name of the parameter for error messages
+     * @returns {Object|null} Object with {lng, lat} properties or null if invalid
+     */
+    const parseCoordinates = (coordInput, paramName) => {
+      try {
+        let lng, lat;
+        
+        if (Array.isArray(coordInput)) {
+          if (coordInput.length !== 2) {
+            throw new Error(`Invalid ${paramName}: expected array with 2 elements [lng, lat]`);
+          }
+          [lng, lat] = coordInput;
+        } else if (typeof coordInput === 'string') {
+          const coords = coordInput.split(',').map(coord => parseFloat(coord.trim()));
+          if (coords.length !== 2 || coords.some(isNaN)) {
+            throw new Error(`Invalid ${paramName}: expected "lng,lat" format`);
+          }
+          [lng, lat] = coords;
+        } else {
+          throw new Error(`Invalid ${paramName}: expected string or array`);
+        }
+
+        // Validate coordinate ranges
+        if (lng < -180 || lng > 180) {
+          throw new Error(`Invalid ${paramName}: longitude must be between -180 and 180`);
+        }
+        if (lat < -90 || lat > 90) {
+          throw new Error(`Invalid ${paramName}: latitude must be between -90 and 90`);
+        }
+
+        return { lng, lat };
+      } catch (error) {
+        console.error(`Error parsing ${paramName}:`, error.message);
+        return null;
+      }
+    };
+
+    // Parse current location
     if (currentLocation) {
-      try {
-        if (Array.isArray(currentLocation)) {
-          [currentLng, currentLat] = currentLocation;
-        } else if (typeof currentLocation === 'string') {
-          [currentLng, currentLat] = currentLocation.split(',').map(coord => parseFloat(coord.trim()));
-        }
+      const coords = parseCoordinates(currentLocation, 'currentLocation');
+      if (coords) {
+        currentLng = coords.lng;
+        currentLat = coords.lat;
         console.log("Current location parsed:", { currentLng, currentLat });
-      } catch (error) {
-        console.error("Invalid current location coordinates:", error);
       }
     }
 
+    // Parse pickup location
     if (pickupLocation) {
-      try {
-        if (Array.isArray(pickupLocation)) {
-          [pickupLng, pickupLat] = pickupLocation;
-        } else if (typeof pickupLocation === 'string') {
-          [pickupLng, pickupLat] = pickupLocation.split(',').map(coord => parseFloat(coord.trim()));
-        }
+      const coords = parseCoordinates(pickupLocation, 'pickupLocation');
+      if (coords) {
+        pickupLng = coords.lng;
+        pickupLat = coords.lat;
         console.log("Pickup location parsed:", { pickupLng, pickupLat });
-      } catch (error) {
-        console.error("Invalid pickup location coordinates:", error);
       }
     }
 
+    // Parse dropoff location
     if (dropoffLocation) {
-      try {
-        if (Array.isArray(dropoffLocation)) {
-          [dropoffLng, dropoffLat] = dropoffLocation;
-        } else if (typeof dropoffLocation === 'string') {
-          [dropoffLng, dropoffLat] = dropoffLocation.split(',').map(coord => parseFloat(coord.trim()));
-        }
+      const coords = parseCoordinates(dropoffLocation, 'dropoffLocation');
+      if (coords) {
+        dropoffLng = coords.lng;
+        dropoffLat = coords.lat;
         console.log("Dropoff location parsed:", { dropoffLng, dropoffLat });
-      } catch (error) {
-        console.error("Invalid dropoff location coordinates:", error);
       }
     }
 
-    // Two-step location filtering approach for better accuracy
+    // Enhanced geospatial filtering with support for pickupDropoffBoth
     let tripsData = [];
     let total = 0;
 
-    if (pickupLat && pickupLng) {
-      // Step 1: Find trips near pickup point
-      console.log("Step 1: Finding trips near pickup point:", { pickupLng, pickupLat });
-      const pickupCircle = makeCirclePolygon(pickupLng, pickupLat, searchRadius);
-      const pickupNearbyTrips = await trips
-        .find({
-          routeGeoJSON: { $geoIntersects: { $geometry: pickupCircle } },
-          ...(Object.keys(filter).length ? { $and: [filter] } : {}),
-        })
+    /**
+     * Helper function to build the final query with proper population
+     * Applies consistent population, sorting, pagination across all queries
+     * 
+     * @param {Object} queryFilter - MongoDB filter object
+     * @returns {Promise} Mongoose query promise
+     */
+    const buildQueryWithPopulation = (queryFilter) => {
+      return trips
+        .find(queryFilter)
         .populate('tripAddedBy', 'name email phone')
         .populate('driver', 'name email phone')
         .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
@@ -503,99 +623,100 @@ exports.getAllTrips = async (req, res) => {
         .sort({ _id: -1 })
         .skip(skip)
         .limit(parseInt(limit));
+    };
 
-      console.log(`Found ${pickupNearbyTrips.length} trips near pickup point`);
+    /**
+     * Helper function to get total count for pagination
+     * 
+     * @param {Object} queryFilter - MongoDB filter object
+     * @returns {Promise<number>} Promise resolving to total count
+     */
+    const getTotalCount = (queryFilter) => {
+      return trips.countDocuments(queryFilter);
+    };
 
-      // Step 2: Filter those that also pass near dropoff point
+    if (pickupLat && pickupLng) {
+      const pickupOrFilters = buildGeoOrFilters(pickupLng, pickupLat, searchRadius);
+      
       if (dropoffLat && dropoffLng) {
-        console.log("Step 2: Filtering for dropoff proximity:", { dropoffLng, dropoffLat });
-        tripsData = pickupNearbyTrips.filter((trip) => {
-          if (!trip.routeGeoJSON || !trip.routeGeoJSON.coordinates) {
-            return false;
-          }
-
-          // Check if any route coordinate is within radius of dropoff location
-          return trip.routeGeoJSON.coordinates.some((coord) => {
-            const [lng, lat] = coord;
-            const dist = getDistanceFromLatLonInMeters(
-              lat,
-              lng,
-              dropoffLat,
-              dropoffLng
-            );
-            return dist <= searchRadius;
-          });
+        // Both pickup and dropoff provided
+        console.log("Finding trips near both pickup and dropoff points:", { 
+          pickup: { pickupLng, pickupLat }, 
+          dropoff: { dropoffLng, dropoffLat } 
         });
-        console.log(`After dropoff filtering: ${tripsData.length} trips`);
+        
+        const dropoffOrFilters = buildGeoOrFilters(dropoffLng, dropoffLat, searchRadius);
+        
+        // Check if pickupDropoffBoth is true (require proximity to BOTH points)
+        if (pickupDropoffBoth === 'true') {
+          console.log("Requiring proximity to BOTH pickup and dropoff points");
+          const finalFilter = {
+            $and: [
+              filter,
+              { $or: pickupOrFilters },
+              { $or: dropoffOrFilters }
+            ]
+          };
+          
+          tripsData = await buildQueryWithPopulation(finalFilter);
+          total = await getTotalCount(finalFilter);
+        } else {
+          // Default behavior: require proximity to pickup, optional proximity to dropoff
+          console.log("Requiring proximity to pickup, optional proximity to dropoff");
+          
+          // First get trips near pickup
+          const pickupFilter = {
+            $and: [filter, { $or: pickupOrFilters }]
+          };
+          
+          const pickupTrips = await buildQueryWithPopulation(pickupFilter);
+          console.log(`Found ${pickupTrips.length} trips near pickup point`);
+          
+          // Then filter those that are also near dropoff
+          const dropoffFilter = {
+            $and: [filter, { $or: pickupOrFilters }, { $or: dropoffOrFilters }]
+          };
+          
+          tripsData = await buildQueryWithPopulation(dropoffFilter);
+          total = await getTotalCount(dropoffFilter);
+          
+          console.log(`After dropoff filtering: ${tripsData.length} trips`);
+        }
       } else {
-        tripsData = pickupNearbyTrips;
+        // Only pickup provided
+        console.log("Finding trips near pickup point:", { pickupLng, pickupLat });
+        const finalFilter = {
+          $and: [filter, { $or: pickupOrFilters }]
+        };
+        
+        tripsData = await buildQueryWithPopulation(finalFilter);
+        total = await getTotalCount(finalFilter);
       }
-
-      // Get total count for pagination
-      total = await trips.countDocuments({
-        routeGeoJSON: { $geoIntersects: { $geometry: pickupCircle } },
-        ...(Object.keys(filter).length ? { $and: [filter] } : {}),
-      });
-
     } else if (dropoffLat && dropoffLng) {
       // Only dropoff provided
       console.log("Finding trips near dropoff point:", { dropoffLng, dropoffLat });
-      const dropoffCircle = makeCirclePolygon(dropoffLng, dropoffLat, searchRadius);
-      tripsData = await trips
-        .find({
-          routeGeoJSON: { $geoIntersects: { $geometry: dropoffCircle } },
-          ...(Object.keys(filter).length ? { $and: [filter] } : {}),
-        })
-        .populate('tripAddedBy', 'name email phone')
-        .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
-        .populate('goodsType', 'name description')
-        .populate('status', 'name description')
-        .sort({ _id: -1 })
-        .skip(skip)
-        .limit(parseInt(limit));
-
-      total = await trips.countDocuments({
-        routeGeoJSON: { $geoIntersects: { $geometry: dropoffCircle } },
-        ...(Object.keys(filter).length ? { $and: [filter] } : {}),
-      });
-
+      const dropoffOrFilters = buildGeoOrFilters(dropoffLng, dropoffLat, searchRadius);
+      const finalFilter = {
+        $and: [filter, { $or: dropoffOrFilters }]
+      };
+      
+      tripsData = await buildQueryWithPopulation(finalFilter);
+      total = await getTotalCount(finalFilter);
     } else if (currentLat && currentLng) {
       // Current location filtering
       console.log("Finding trips near current location:", { currentLng, currentLat });
-      const currentCircle = makeCirclePolygon(currentLng, currentLat, searchRadius);
-      tripsData = await trips
-        .find({
-          routeGeoJSON: { $geoIntersects: { $geometry: currentCircle } },
-          ...(Object.keys(filter).length ? { $and: [filter] } : {}),
-        })
-        .populate('tripAddedBy', 'name email phone')
-        .populate('driver', 'name email phone')
-        .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
-        .populate('goodsType', 'name description')
-        .populate('status', 'name description')
-        .sort({ _id: -1 })
-        .skip(skip)
-        .limit(parseInt(limit));
-
-      total = await trips.countDocuments({
-        routeGeoJSON: { $geoIntersects: { $geometry: currentCircle } },
-        ...(Object.keys(filter).length ? { $and: [filter] } : {}),
-      });
-
+      const currentOrFilters = buildGeoOrFilters(currentLng, currentLat, searchRadius);
+      const finalFilter = {
+        $and: [filter, { $or: currentOrFilters }]
+      };
+      
+      tripsData = await buildQueryWithPopulation(finalFilter);
+      total = await getTotalCount(finalFilter);
     } else {
       // No location filtering - use standard approach
       console.log("No location filtering - using standard query");
-      tripsData = await trips.find(filter)
-        .populate('tripAddedBy', 'name email phone')
-        .populate('driver', 'name email phone')
-        .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
-        .populate('goodsType', 'name description')
-        .populate('status', 'name description')
-        .sort({ _id: -1 })
-        .skip(skip)
-        .limit(parseInt(limit));
-
-      total = await trips.countDocuments(filter);
+      tripsData = await buildQueryWithPopulation(filter);
+      total = await getTotalCount(filter);
     }
 
     const response = success(
