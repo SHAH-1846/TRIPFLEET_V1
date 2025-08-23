@@ -35,6 +35,7 @@ const bookingRoutes = require("./routes/bookingRoutes");
 const imageRoutes = require("./routes/imageRoutes");
 const documentRoutes = require("./routes/documentRoutes");
 const driverConnectionRoutes = require("./routes/driverConnectionRoutes");
+const locationRoutes = require("./routes/locationRoutes");
 
 // Passport configuration
 const passport = require("passport");
@@ -159,6 +160,7 @@ apiV1.use("/bookings", bookingRoutes);
 apiV1.use("/images", imageRoutes);
 apiV1.use("/documents", documentRoutes);
 apiV1.use("/driver-connections", driverConnectionRoutes);
+apiV1.use("/locations", locationRoutes);
 
 // Mount API version
 app.use("/api/v1", apiV1);

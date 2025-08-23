@@ -19,6 +19,9 @@
     "seed:goods_accepted": "node db/seeders/goodsAcceptedSeeder.js",
     "seed:trip_status" : "node db/seeders/tripStatusSeeder.js",
     "seed:customer_request_status" : "node db/seeders/customerRequestStatusSeeder.js",
+    "seed:locations": "node db/seeders/locationSeeder.js up",
+    "seed:locations:up": "node db/seeders/locationSeeder.js up",
+    "seed:locations:down": "node db/seeders/locationSeeder.js down",
     "seed": "node db/seeders/run-seeders.js",
     "cleanup": "node utils/cleanupOrphanedFiles.js",
     "health": "curl http://localhost:3002/health"

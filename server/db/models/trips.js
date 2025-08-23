@@ -135,7 +135,19 @@ const trips = new mongoose.Schema(
   }
 );
 
-trips.index({ "tripStartLocation.address": "text", "tripDestination.address": "text" });
+// Enhanced text indexes for better search performance
+trips.index({ 
+  "tripStartLocation.address": "text", 
+  "tripDestination.address": "text",
+  "title": "text",
+  "description": "text",
+  "viaRoutes.address": "text"
+});
+
+// Individual indexes for better query performance
+trips.index({ title: 1 });
+trips.index({ description: 1 });
+trips.index({ "viaRoutes.address": 1 });
 //Add 2dsphere index for routeGeoJSON
 trips.index({ routeGeoJSON: "2dsphere" });
 //Add 2dsphere indexes for location coordinates

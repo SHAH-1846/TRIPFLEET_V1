@@ -341,7 +341,7 @@ exports.createTrip = async (req, res) => {
  * - page: Page number (default: 1)
  * - limit: Items per page (default: 10)
  * - status: Trip status filter
- * - search: Text search in address fields
+ * - search: Enhanced text search across title, description, start/destination addresses, and via routes
  * - dateFrom: Start date filter (ISO string)
  * - dateTo: End date filter (ISO string)
  * - pickupLocation: "lng,lat" or [lng, lat] - search for trips near pickup point
@@ -412,10 +412,13 @@ exports.getAllTrips = async (req, res) => {
     }
 
     if (search) {
-      // Search only string fields; avoid regex on ObjectId refs (e.g., goodsType)
+      // Enhanced search across multiple fields for better trip visibility
       filter.$or = [
+        { title: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
         { 'tripStartLocation.address': { $regex: search, $options: 'i' } },
-        { 'tripDestination.address': { $regex: search, $options: 'i' } }
+        { 'tripDestination.address': { $regex: search, $options: 'i' } },
+        { 'viaRoutes.address': { $regex: search, $options: 'i' } }
       ];
     }
 
@@ -1372,7 +1375,8 @@ exports.updateTripStatus = async (req, res) => {
 /**
  * Get trips created by the current user ("my trips")
  * Optional: include trips where user is assigned as driver via includeAssigned=true
- * Supports pagination and basic filters similar to getAllTrips
+ * Enhanced with comprehensive text search capabilities
+ * Supports pagination and enhanced filters similar to getAllTrips
  * @route GET /api/v1/trips/my
  */
 exports.getMyTrips = async (req, res) => {
@@ -1413,10 +1417,15 @@ exports.getMyTrips = async (req, res) => {
     }
 
     if (search) {
-      filter.$or = (filter.$or || []).concat([
+      // Enhanced search across multiple fields for better trip visibility
+      const searchFilters = [
+        { title: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
         { 'tripStartLocation.address': { $regex: search, $options: 'i' } },
-        { 'tripDestination.address': { $regex: search, $options: 'i' } }
-      ]);
+        { 'tripDestination.address': { $regex: search, $options: 'i' } },
+        { 'viaRoutes.address': { $regex: search, $options: 'i' } }
+      ];
+      filter.$or = (filter.$or || []).concat(searchFilters);
     }
 
     if (dateFrom || dateTo) {
