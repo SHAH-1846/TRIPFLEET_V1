@@ -80,8 +80,8 @@ exports.authenticateToken = (req, res, next) => {
         const response = unauthorized('Invalid or expired token');
         return res.status(response.statusCode).json(response);
       }
-      
       req.user = decoded;
+
       next();
     });
   } catch (error) {

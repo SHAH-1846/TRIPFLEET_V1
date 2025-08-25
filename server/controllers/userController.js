@@ -376,8 +376,11 @@ exports.registerProfile = async (req, res) => {
     const accessToken = jwt.sign(
       {
         user_id: newUser._id,
-        user_type: "customer",
+        user_type: newUser.user_type,
         email: newUser.email,
+        phone: newUser.phone,
+        id: otpRecord._id,
+        type: "phone_verified_login",
       },
       process.env.PRIVATE_KEY,
       { expiresIn: TOKEN_EXPIRY }

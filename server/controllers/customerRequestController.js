@@ -84,6 +84,8 @@ exports.createRequest = async (req, res) => {
 
     // Create customer request aligned with model (coordinates are [lng, lat])
     const requestData = {
+      title: value.title,
+      description: value.description,
       user: userId,
       pickupLocation: {
         address: value.pickupLocation.address,
@@ -189,6 +191,8 @@ exports.getAllRequests = async (req, res) => {
       const regex = { $regex: q.trim(), $options: 'i' };
       andConditions.push({
         $or: [
+          { title: regex },
+          { description: regex },
           { 'pickupLocation.address': regex },
           { 'dropoffLocation.address': regex },
           { 'packageDetails.description': regex },

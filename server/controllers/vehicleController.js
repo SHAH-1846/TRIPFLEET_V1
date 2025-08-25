@@ -1032,7 +1032,7 @@ const validateImageReference = async (imageId, userId) => {
     }
 
     // Check if the image was uploaded by the same user
-    if (image.uploadedBy && image.uploadedBy.toString() !== userId) {
+    if (!image.uploadedBy || image.uploadedBy.toString() !== userId) {
       return { isValid: false, errors: ["Image does not belong to you"] };
     }
 

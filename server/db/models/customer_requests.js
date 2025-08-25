@@ -2,6 +2,16 @@ const mongoose = require("mongoose");
 
 const customer_requests = new mongoose.Schema(
   {
+    title: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    description: {
+      type: String,
+      required: true,
+      trim: true,
+    },
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "users",
@@ -72,5 +82,7 @@ const customer_requests = new mongoose.Schema(
 // Indexes for spatial queries (2dsphere on [lng, lat] arrays)
 customer_requests.index({ "pickupLocation.coordinates": "2dsphere" });
 customer_requests.index({ "dropoffLocation.coordinates": "2dsphere" });
+// Text index to enable search on title and description
+customer_requests.index({ title: "text", description: "text" });
 
 module.exports = mongoose.model("customer_requests", customer_requests);

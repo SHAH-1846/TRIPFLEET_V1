@@ -316,6 +316,8 @@ const bookingSchemas = {
 // Customer Request Schemas (aligned with customer_requests model)
 const customerRequestSchemas = {
   createRequest: Joi.object({
+    title: Joi.string().trim().min(3).max(200).required(),
+    description: Joi.string().trim().max(1000).required(),
     pickupLocation: Joi.object({
       address: Joi.string().trim().min(3).max(200).required(),
       coordinates: Joi.array().items(Joi.number()).length(2).required() // [lng, lat]
@@ -339,7 +341,7 @@ const customerRequestSchemas = {
         width: Joi.number().min(0).optional(),
         height: Joi.number().min(0).optional(),
       }).optional(),
-      description: Joi.string().trim().max(500).required(),
+      description: Joi.string().trim().max(500).optional(),
     }).required(),
     images: Joi.array().items(fields.objectId).required(),
     documents: Joi.array().items(fields.objectId).optional(),
@@ -348,6 +350,8 @@ const customerRequestSchemas = {
   }),
 
   updateRequest: Joi.object({
+    title: Joi.string().trim().min(3).max(200).optional(),
+    description: Joi.string().trim().max(1000).optional(),
     pickupLocation: Joi.object({
       address: Joi.string().trim().min(3).max(200).optional(),
       coordinates: Joi.array().items(Joi.number()).length(2).optional(),
