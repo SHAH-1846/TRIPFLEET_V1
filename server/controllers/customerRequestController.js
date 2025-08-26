@@ -12,17 +12,17 @@ const images = require("../db/models/images");
 const customerRequestStatus = require("../db/models/customer_request_status");
 
 // Utils
-const { 
-  success, 
-  created, 
-  updated, 
-  deleted, 
-  badRequest, 
-  unauthorized, 
-  forbidden, 
-  notFound, 
-  conflict, 
-  serverError 
+const {
+  success,
+  created,
+  updated,
+  deleted,
+  badRequest,
+  unauthorized,
+  forbidden,
+  notFound,
+  conflict,
+  serverError
 } = require("../utils/response-handler");
 
 // Validation schemas
@@ -37,9 +37,9 @@ exports.createRequest = async (req, res) => {
     const userId = req.user.user_id;
 
     // Validate request data
-    const { error, value } = customerRequestSchemas.createRequest.validate(req.body, { 
-      abortEarly: false, 
-      stripUnknown: true 
+    const { error, value } = customerRequestSchemas.createRequest.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true
     });
 
     if (error) {
@@ -47,7 +47,7 @@ exports.createRequest = async (req, res) => {
         field: detail.path.join('.'),
         message: detail.message
       }));
-      
+
       const response = badRequest("Validation failed", errors);
       return res.status(response.statusCode).json(response);
     }
@@ -222,7 +222,7 @@ exports.getAllRequests = async (req, res) => {
       try {
         if (Array.isArray(input)) return input.map((v) => parseFloat(v));
         if (typeof input === 'string') return input.split(',').map((c) => parseFloat(c.trim()));
-      } catch (_) {}
+      } catch (_) { }
       return [];
     };
 
@@ -325,9 +325,9 @@ exports.getRequestById = async (req, res) => {
     // Get request with populated data
     const request = await customer_requests.findById(requestId)
       .populate('user', 'name email phone')
-      .populate('assignedTo', 'name email phone')
       .populate('images', 'url filename')
-      .populate('documents', 'url filename');
+      .populate('documents', 'url filename')
+      .populate('status', 'name description');
 
     if (!request) {
       const response = notFound("Customer request not found");
@@ -340,7 +340,7 @@ exports.getRequestById = async (req, res) => {
       const response = forbidden("Access denied");
       return res.status(response.statusCode).json(response);
     }
-    
+
     if (userType.name === 'driver' && request.assignedTo && request.assignedTo._id.toString() !== userId) {
       const response = forbidden("Access denied");
       return res.status(response.statusCode).json(response);
@@ -370,9 +370,9 @@ exports.updateRequest = async (req, res) => {
     const userId = req.user.user_id;
 
     // Validate request data
-    const { error, value } = customerRequestSchemas.updateRequest.validate(req.body, { 
-      abortEarly: false, 
-      stripUnknown: true 
+    const { error, value } = customerRequestSchemas.updateRequest.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true
     });
 
     if (error) {
@@ -380,7 +380,7 @@ exports.updateRequest = async (req, res) => {
         field: detail.path.join('.'),
         message: detail.message
       }));
-      
+
       const response = badRequest("Validation failed", errors);
       return res.status(response.statusCode).json(response);
     }
@@ -443,16 +443,16 @@ exports.updateRequest = async (req, res) => {
     // Update request
     const updatedRequest = await customer_requests.findByIdAndUpdate(
       requestId,
-      { 
+      {
         ...value,
         updatedAt: new Date()
       },
       { new: true }
     )
-    .populate('user', 'name email phone')
-    .populate('status', 'name description')
-    .populate('images', 'filename url')
-    .populate('documents', 'filename url');
+      .populate('user', 'name email phone')
+      .populate('status', 'name description')
+      .populate('images', 'filename url')
+      .populate('documents', 'filename url');
 
     const response = updated(
       { request: updatedRequest },
@@ -515,7 +515,7 @@ exports.assignRequest = async (req, res) => {
     // Update request assignment
     const updatedRequest = await customer_requests.findByIdAndUpdate(
       requestId,
-      { 
+      {
         assignedTo: driverId,
         status: 'in_progress',
         assignedAt: new Date(),
@@ -523,9 +523,9 @@ exports.assignRequest = async (req, res) => {
       },
       { new: true }
     )
-    .populate('customer', 'name email phone')
-    .populate('assignedTo', 'name email phone')
-    .populate('attachments', 'url filename');
+      .populate('customer', 'name email phone')
+      .populate('assignedTo', 'name email phone')
+      .populate('attachments', 'url filename');
 
     const response = updated(
       { request: updatedRequest },
@@ -571,7 +571,7 @@ exports.updateRequestStatus = async (req, res) => {
       const response = forbidden("Access denied");
       return res.status(response.statusCode).json(response);
     }
-    
+
     if (userType.name === 'driver' && request.assignedTo && request.assignedTo.toString() !== userId) {
       const response = forbidden("Access denied");
       return res.status(response.statusCode).json(response);
@@ -605,9 +605,9 @@ exports.updateRequestStatus = async (req, res) => {
       updateData,
       { new: true }
     )
-    .populate('customer', 'name email phone')
-    .populate('assignedTo', 'name email phone')
-    .populate('attachments', 'url filename');
+      .populate('customer', 'name email phone')
+      .populate('assignedTo', 'name email phone')
+      .populate('attachments', 'url filename');
 
     const response = updated(
       { request: updatedRequest },
@@ -648,7 +648,7 @@ exports.deleteRequest = async (req, res) => {
 
     // Check if user can delete this request
     const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'customer' && request.customer.toString() !== userId) {
+    if (userType.name === 'customer' && request.user.toString() !== userId) {
       const response = forbidden("Access denied");
       return res.status(response.statusCode).json(response);
     }
@@ -695,7 +695,7 @@ exports.getRequestStats = async (req, res) => {
     // Build filter based on user role
     const filter = { isActive: true };
     const userType = await require("../db/models/user_types").findById(user.user_type);
-    
+
     if (userType.name === 'customer') {
       filter.customer = userId;
     } else if (userType.name === 'driver') {
