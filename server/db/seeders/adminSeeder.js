@@ -8,11 +8,12 @@ const MONGO_URI = process.env.MONGODB_URI;
 const adminUsers = [
 {
   "_id": "684abe80b88048daeaebffa0",
-  "firstName": "Robert",
-  "lastName": "Doe",
-  "email": "robert@gmail.com",
+  "name": "Admin",
+  "phone": "9876543210",
+  "whatsappNumber": "9876543210",
+  "email": "admin@gmail.com",
   "user_type": "68484d1eefb856d41ac28c54",
-  "password": "Robert#123",
+  "password": "Admin#123",
 },
 ];
 

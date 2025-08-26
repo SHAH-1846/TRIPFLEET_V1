@@ -13,6 +13,7 @@
     "format": "prettier --write .",
     "docs": "jsdoc -c jsdoc.json",
     "migrate": "node db/migrations/run-migrations.js",
+    "seed:admin": "node db/seeders/adminSeeder.js",
     "seed:user_types": "node db/seeders/userTypeSeeder.js",
     "seed:vehicle_types": "node db/seeders/vehicleTypeSeeder.js",
     "seed:vehicle_body_types": "node db/seeders/vehicleBodyTypeSeeder.js",

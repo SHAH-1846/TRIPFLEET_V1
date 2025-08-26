@@ -384,6 +384,64 @@ const customerRequestSchemas = {
   }).min(1),
 };
 
+// Subscription module schemas
+const subscriptionSchemas = {
+  createPlan: Joi.object({
+    name: Joi.string().trim().min(3).max(100).required(),
+    description: Joi.string().trim().max(500).optional(),
+    maxLeads: Joi.number().integer().min(0).required(),
+    maxLeadsDistanceKm: Joi.number().min(0).required(),
+    maxTrips: Joi.number().integer().min(0).required(),
+    maxTripsDistanceKm: Joi.number().min(0).required(),
+    durationDays: Joi.number().integer().min(1).max(3650).required(),
+    priceMinor: Joi.number().integer().min(0).required(),
+    currency: Joi.string().trim().length(3).default("INR"),
+    isActive: Joi.boolean().optional(),
+  }),
+
+  updatePlan: Joi.object({
+    name: Joi.string().trim().min(3).max(100).optional(),
+    description: Joi.string().trim().max(500).optional(),
+    maxLeads: Joi.number().integer().min(0).optional(),
+    maxLeadsDistanceKm: Joi.number().min(0).optional(),
+    maxTrips: Joi.number().integer().min(0).optional(),
+    maxTripsDistanceKm: Joi.number().min(0).optional(),
+    durationDays: Joi.number().integer().min(1).max(3650).optional(),
+    priceMinor: Joi.number().integer().min(0).optional(),
+    currency: Joi.string().trim().length(3).optional(),
+    isActive: Joi.boolean().optional(),
+  }).min(1),
+
+  leadPricingCreate: Joi.object({
+    distanceKmFrom: Joi.number().min(0).required(),
+    distanceKmTo: Joi.number().greater(Joi.ref('distanceKmFrom')).required(),
+    priceMinor: Joi.number().integer().min(0).required(),
+    currency: Joi.string().trim().length(3).default("INR"),
+    isActive: Joi.boolean().optional(),
+  }),
+
+  leadPricingUpdate: Joi.object({
+    distanceKmFrom: Joi.number().min(0).optional(),
+    distanceKmTo: Joi.number().greater(Joi.ref('distanceKmFrom')).optional(),
+    priceMinor: Joi.number().integer().min(0).optional(),
+    currency: Joi.string().trim().length(3).optional(),
+    isActive: Joi.boolean().optional(),
+  }).min(1),
+
+  subscribe: Joi.object({
+    planId: fields.objectId,
+  }),
+
+  upgrade: Joi.object({
+    newPlanId: fields.objectId,
+    strategy: Joi.string().valid('usage', 'prorate').default('prorate'),
+  }),
+
+  cancel: Joi.object({
+    reason: Joi.string().trim().max(500).optional(),
+  })
+};
+
 // Query Schemas
 const querySchemas = {
   pagination: Joi.object({
@@ -451,6 +509,7 @@ module.exports = {
   tripSchemas,
   bookingSchemas,
   customerRequestSchemas,
+  subscriptionSchemas,
   driverConnectionSchemas,
   querySchemas,
   fileSchemas,
