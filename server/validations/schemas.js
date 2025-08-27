@@ -428,6 +428,22 @@ const subscriptionSchemas = {
     isActive: Joi.boolean().optional(),
   }).min(1),
 
+  tripsPricingCreate: Joi.object({
+    distanceKmFrom: Joi.number().min(0).required(),
+    distanceKmTo: Joi.number().greater(Joi.ref('distanceKmFrom')).required(),
+    priceMinor: Joi.number().integer().min(0).required(),
+    currency: Joi.string().trim().length(3).default("INR"),
+    isActive: Joi.boolean().optional(),
+  }),
+
+  tripsPricingUpdate: Joi.object({
+    distanceKmFrom: Joi.number().min(0).optional(),
+    distanceKmTo: Joi.number().greater(Joi.ref('distanceKmFrom')).optional(),
+    priceMinor: Joi.number().integer().min(0).optional(),
+    currency: Joi.string().trim().length(3).optional(),
+    isActive: Joi.boolean().optional(),
+  }).min(1),
+
   subscribe: Joi.object({
     planId: fields.objectId,
   }),
@@ -502,6 +518,76 @@ const fileSchemas = {
   }),
 };
 
+// Token module schemas
+const tokenSchemas = {
+  createTokenPlan: Joi.object({
+    name: Joi.string().trim().min(3).max(100).required(),
+    description: Joi.string().trim().max(500).optional(),
+    tokensAmount: Joi.number().integer().min(1).required(),
+    priceMinor: Joi.number().integer().min(0).required(),
+    currency: Joi.string().trim().length(3).default("INR"),
+    isActive: Joi.boolean().optional(),
+  }),
+
+  updateTokenPlan: Joi.object({
+    name: Joi.string().trim().min(3).max(100).optional(),
+    description: Joi.string().trim().max(500).optional(),
+    tokensAmount: Joi.number().integer().min(1).optional(),
+    priceMinor: Joi.number().integer().min(0).optional(),
+    currency: Joi.string().trim().length(3).optional(),
+    isActive: Joi.boolean().optional(),
+  }).min(1),
+
+  purchaseTokenPlan: Joi.object({
+    planId: fields.objectId,
+  }),
+
+  walletCredit: Joi.object({
+    driverId: fields.objectId,
+    amount: Joi.number().integer().min(1).required(),
+    reason: Joi.string().trim().max(200).optional(),
+  }),
+
+  walletDebit: Joi.object({
+    driverId: fields.objectId,
+    amount: Joi.number().integer().min(1).required(),
+    reason: Joi.string().trim().max(200).optional(),
+  }),
+
+  leadTokensCreate: Joi.object({
+    distanceKmFrom: Joi.number().min(0).required(),
+    distanceKmTo: Joi.number().greater(Joi.ref('distanceKmFrom')).required(),
+    tokensRequired: Joi.number().integer().min(0).required(),
+    isActive: Joi.boolean().optional(),
+  }),
+
+  leadTokensUpdate: Joi.object({
+    distanceKmFrom: Joi.number().min(0).optional(),
+    distanceKmTo: Joi.number().greater(Joi.ref('distanceKmFrom')).optional(),
+    tokensRequired: Joi.number().integer().min(0).optional(),
+    isActive: Joi.boolean().optional(),
+  }).min(1),
+
+  tripTokensCreate: Joi.object({
+    distanceKmFrom: Joi.number().min(0).required(),
+    distanceKmTo: Joi.number().greater(Joi.ref('distanceKmFrom')).required(),
+    tokensRequired: Joi.number().integer().min(0).required(),
+    isActive: Joi.boolean().optional(),
+  }),
+
+  tripTokensUpdate: Joi.object({
+    distanceKmFrom: Joi.number().min(0).optional(),
+    distanceKmTo: Joi.number().greater(Joi.ref('distanceKmFrom')).optional(),
+    tokensRequired: Joi.number().integer().min(0).optional(),
+    isActive: Joi.boolean().optional(),
+  }).min(1),
+
+  freeTokenSettingsUpsert: Joi.object({
+    tokensOnRegistration: Joi.number().integer().min(0).required(),
+    isActive: Joi.boolean().optional(),
+  }),
+};
+
 module.exports = {
   authSchemas,
   userSchemas,
@@ -515,4 +601,5 @@ module.exports = {
   fileSchemas,
   patterns,
   fields,
+  tokenSchemas,
 };

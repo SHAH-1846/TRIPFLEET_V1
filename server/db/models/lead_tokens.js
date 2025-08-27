@@ -1,12 +1,10 @@
 const mongoose = require("mongoose");
 
-const leadPricingSchema = new mongoose.Schema(
+const leadTokensSchema = new mongoose.Schema(
   {
-    // For drivers without subscription or on free plan
     distanceKmFrom: { type: Number, required: true },
     distanceKmTo: { type: Number, required: true },
-    priceMinor: { type: Number, required: true },
-    currency: { type: String, default: "INR" },
+    tokensRequired: { type: Number, required: true, min: 0 },
     isActive: { type: Boolean, default: true },
     addedBy: { type: mongoose.Schema.Types.ObjectId, ref: "users", required: true },
     lastUpdatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "users" },
@@ -14,12 +12,10 @@ const leadPricingSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-    collection: "lead_pricing",
+    collection: "lead_tokens",
   }
 );
 
-leadPricingSchema.index({ distanceKmFrom: 1, distanceKmTo: 1 }, { unique: true });
+leadTokensSchema.index({ distanceKmFrom: 1, distanceKmTo: 1 }, { unique: true });
 
-module.exports = mongoose.model("lead_pricing", leadPricingSchema);
-
-
+module.exports = mongoose.model("lead_tokens", leadTokensSchema);

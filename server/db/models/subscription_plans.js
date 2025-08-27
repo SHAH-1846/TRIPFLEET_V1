@@ -15,6 +15,9 @@ const subscriptionPlanSchema = new mongoose.Schema(
     priceMinor: { type: Number, required: true, min: 0 },
     currency: { type: String, default: "INR" },
     isActive: { type: Boolean, default: true },
+    addedBy: { type: mongoose.Schema.Types.ObjectId, ref: "users", required: true },
+    lastUpdatedBy: { type: mongoose.Schema.Types.ObjectId, ref: "users" },
+    deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: "users" },
   },
   {
     timestamps: true,

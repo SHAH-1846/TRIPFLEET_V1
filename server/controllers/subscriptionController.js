@@ -3,6 +3,7 @@ const { Types } = require("mongoose");
 const SubscriptionPlan = require("../db/models/subscription_plans");
 const DriverSubscription = require("../db/models/driver_subscriptions");
 const LeadPricing = require("../db/models/lead_pricing");
+const TripsPricing = require("../db/models/trips_pricing");
 const users = require("../db/models/users");
 
 const {
@@ -28,7 +29,10 @@ exports.createPlan = async (req, res) => {
     const exists = await SubscriptionPlan.findOne({ name: value.name });
     if (exists) return res.status(409).json(badRequest("Plan with this name already exists"));
 
-    const plan = await SubscriptionPlan.create(value);
+    const plan = await SubscriptionPlan.create({
+      ...value,
+      addedBy: req.user.user_id,
+    });
     return res.status(201).json(created({ plan }, "Plan created"));
   } catch (err) {
     console.error("createPlan error", err);
@@ -42,7 +46,11 @@ exports.updatePlan = async (req, res) => {
     const { error, value } = subscriptionSchemas.updatePlan.validate(req.body, { abortEarly: false, stripUnknown: true });
     if (error) return res.status(400).json(badRequest("Validation failed", error.details));
 
-    const plan = await SubscriptionPlan.findByIdAndUpdate(planId, { ...value, updatedAt: new Date() }, { new: true });
+    const plan = await SubscriptionPlan.findByIdAndUpdate(planId, { 
+      ...value, 
+      lastUpdatedBy: req.user.user_id,
+      updatedAt: new Date() 
+    }, { new: true });
     if (!plan) return res.status(404).json(notFound("Plan not found"));
     return res.json(updated({ plan }, "Plan updated"));
   } catch (err) {
@@ -64,7 +72,11 @@ exports.listPlans = async (_req, res) => {
 exports.deletePlan = async (req, res) => {
   try {
     const { planId } = req.params;
-    const plan = await SubscriptionPlan.findByIdAndUpdate(planId, { isActive: false, updatedAt: new Date() }, { new: true });
+    const plan = await SubscriptionPlan.findByIdAndUpdate(planId, { 
+      isActive: false, 
+      deletedBy: req.user.user_id,
+      updatedAt: new Date() 
+    }, { new: true });
     if (!plan) return res.status(404).json(notFound("Plan not found"));
     return res.json(deleted("Plan archived"));
   } catch (err) {
@@ -87,7 +99,10 @@ exports.createLeadPricing = async (req, res) => {
     });
     if (overlap) return res.status(409).json(badRequest("Overlapping distance band exists"));
 
-    const pricing = await LeadPricing.create(value);
+    const pricing = await LeadPricing.create({
+      ...value,
+      addedBy: req.user.user_id,
+    });
     return res.status(201).json(created({ pricing }, "Lead pricing created"));
   } catch (err) {
     console.error("createLeadPricing error", err);
@@ -101,7 +116,11 @@ exports.updateLeadPricing = async (req, res) => {
     const { error, value } = subscriptionSchemas.leadPricingUpdate.validate(req.body, { abortEarly: false, stripUnknown: true });
     if (error) return res.status(400).json(badRequest("Validation failed", error.details));
 
-    const pricing = await LeadPricing.findByIdAndUpdate(pricingId, { ...value, updatedAt: new Date() }, { new: true });
+    const pricing = await LeadPricing.findByIdAndUpdate(pricingId, { 
+      ...value, 
+      lastUpdatedBy: req.user.user_id,
+      updatedAt: new Date() 
+    }, { new: true });
     if (!pricing) return res.status(404).json(notFound("Lead pricing not found"));
     return res.json(updated({ pricing }, "Lead pricing updated"));
   } catch (err) {
@@ -117,6 +136,93 @@ exports.listLeadPricing = async (_req, res) => {
   } catch (err) {
     console.error("listLeadPricing error", err);
     return res.status(500).json(serverError("Failed to get lead pricing"));
+  }
+};
+
+// Admin: Trips pricing
+exports.createTripsPricing = async (req, res) => {
+  try {
+    const { error, value } = subscriptionSchemas.tripsPricingCreate.validate(req.body, { abortEarly: false, stripUnknown: true });
+    if (error) return res.status(400).json(badRequest("Validation failed", error.details));
+
+    const overlap = await TripsPricing.findOne({
+      $or: [
+        { distanceKmFrom: { $lte: value.distanceKmFrom }, distanceKmTo: { $gt: value.distanceKmFrom } },
+        { distanceKmFrom: { $lt: value.distanceKmTo }, distanceKmTo: { $gte: value.distanceKmTo } },
+      ],
+    });
+    if (overlap) return res.status(409).json(badRequest("Overlapping distance band exists"));
+
+    const pricing = await TripsPricing.create({
+      ...value,
+      addedBy: req.user.user_id,
+    });
+    return res.status(201).json(created({ pricing }, "Trips pricing created"));
+  } catch (err) {
+    console.error("createTripsPricing error", err);
+    return res.status(500).json(serverError("Failed to create trips pricing"));
+  }
+};
+
+exports.updateTripsPricing = async (req, res) => {
+  try {
+    const { pricingId } = req.params;
+    const { error, value } = subscriptionSchemas.tripsPricingUpdate.validate(req.body, { abortEarly: false, stripUnknown: true });
+    if (error) return res.status(400).json(badRequest("Validation failed", error.details));
+
+    const pricing = await TripsPricing.findByIdAndUpdate(pricingId, { 
+      ...value, 
+      lastUpdatedBy: req.user.user_id,
+      updatedAt: new Date() 
+    }, { new: true });
+    if (!pricing) return res.status(404).json(notFound("Trips pricing not found"));
+    return res.json(updated({ pricing }, "Trips pricing updated"));
+  } catch (err) {
+    console.error("updateTripsPricing error", err);
+    return res.status(500).json(serverError("Failed to update trips pricing"));
+  }
+};
+
+exports.listTripsPricing = async (_req, res) => {
+  try {
+    const bands = await TripsPricing.find({ isActive: true }).sort({ distanceKmFrom: 1 });
+    return res.json(success(bands, "Trips pricing bands retrieved"));
+  } catch (err) {
+    console.error("listTripsPricing error", err);
+    return res.status(500).json(serverError("Failed to get trips pricing"));
+  }
+};
+
+// Delete operations for pricing
+exports.deleteLeadPricing = async (req, res) => {
+  try {
+    const { pricingId } = req.params;
+    const pricing = await LeadPricing.findByIdAndUpdate(pricingId, { 
+      isActive: false, 
+      deletedBy: req.user.user_id,
+      updatedAt: new Date() 
+    }, { new: true });
+    if (!pricing) return res.status(404).json(notFound("Lead pricing not found"));
+    return res.json(deleted("Lead pricing archived"));
+  } catch (err) {
+    console.error("deleteLeadPricing error", err);
+    return res.status(500).json(serverError("Failed to delete lead pricing"));
+  }
+};
+
+exports.deleteTripsPricing = async (req, res) => {
+  try {
+    const { pricingId } = req.params;
+    const pricing = await TripsPricing.findByIdAndUpdate(pricingId, { 
+      isActive: false, 
+      deletedBy: req.user.user_id,
+      updatedAt: new Date() 
+    }, { new: true });
+    if (!pricing) return res.status(404).json(notFound("Trips pricing not found"));
+    return res.json(deleted("Trips pricing archived"));
+  } catch (err) {
+    console.error("deleteTripsPricing error", err);
+    return res.status(500).json(serverError("Failed to delete trips pricing"));
   }
 };
 

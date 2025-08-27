@@ -16,6 +16,7 @@ const vehicles = require("../db/models/vehicles");
 const images = require("../db/models/images");
 const Documents = require("../db/models/documents");
 const OTP = require("../db/models/otp");
+const FreeToken = require("./tokenController");
 
 // Utils
 const {
@@ -175,6 +176,9 @@ exports.registerDriver = async (req, res) => {
     };
 
     const newVehicle = await vehicles.create(vehicleData);
+
+    // Credit free tokens if configured
+    try { await FreeToken.creditFreeTokensIfAny(newUser._id); } catch (_) {}
 
     // Clean up OTP record
     await OTP.findByIdAndDelete(otpRecord._id);

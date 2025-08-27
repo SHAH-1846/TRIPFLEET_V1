@@ -1,6 +1,6 @@
 const mongoose = require("mongoose");
 
-const leadPricingSchema = new mongoose.Schema(
+const tripsPricingSchema = new mongoose.Schema(
   {
     // For drivers without subscription or on free plan
     distanceKmFrom: { type: Number, required: true },
@@ -14,12 +14,10 @@ const leadPricingSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
-    collection: "lead_pricing",
+    collection: "trips_pricing",
   }
 );
 
-leadPricingSchema.index({ distanceKmFrom: 1, distanceKmTo: 1 }, { unique: true });
+tripsPricingSchema.index({ distanceKmFrom: 1, distanceKmTo: 1 }, { unique: true });
 
-module.exports = mongoose.model("lead_pricing", leadPricingSchema);
-
-
+module.exports = mongoose.model("trips_pricing", tripsPricingSchema);

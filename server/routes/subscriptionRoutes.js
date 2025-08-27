@@ -19,6 +19,12 @@ router.delete('/plans/:planId', authenticateToken, requireRole(['admin']), valid
 router.post('/lead-pricing', authenticateToken, requireRole(['admin']), sanitizeInput, subscriptionController.createLeadPricing);
 router.put('/lead-pricing/:pricingId', authenticateToken, requireRole(['admin']), validateObjectId('pricingId'), sanitizeInput, subscriptionController.updateLeadPricing);
 router.get('/lead-pricing', authenticateToken, requireRole(['admin']), subscriptionController.listLeadPricing);
+router.delete('/lead-pricing/:pricingId', authenticateToken, requireRole(['admin']), validateObjectId('pricingId'), subscriptionController.deleteLeadPricing);
+
+router.post('/trips-pricing', authenticateToken, requireRole(['admin']), sanitizeInput, subscriptionController.createTripsPricing);
+router.put('/trips-pricing/:pricingId', authenticateToken, requireRole(['admin']), validateObjectId('pricingId'), sanitizeInput, subscriptionController.updateTripsPricing);
+router.get('/trips-pricing', authenticateToken, requireRole(['admin']), subscriptionController.listTripsPricing);
+router.delete('/trips-pricing/:pricingId', authenticateToken, requireRole(['admin']), validateObjectId('pricingId'), subscriptionController.deleteTripsPricing);
 
 // Driver routes
 router.post('/subscribe', authenticateToken, requireRole(['driver']), sanitizeInput, subscriptionController.subscribe);
