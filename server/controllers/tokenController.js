@@ -29,11 +29,11 @@ const getOrCreateWallet = async (driverId) => {
   return wallet;
 };
 
-const creditTokens = async (driverId, amount, reason, addedBy) => {
+const creditTokens = async (driverId, amount, reason, addedBy, planId = null) => {
   const wallet = await getOrCreateWallet(driverId);
   wallet.balance += amount;
   await wallet.save();
-  await TokenTxn.create({ driver: driverId, type: "credit", amount, reason, addedBy });
+  await TokenTxn.create({ driver: driverId, type: "credit", amount, reason, addedBy, plan: planId });
   return wallet;
 };
 
@@ -111,7 +111,7 @@ exports.purchaseTokenPlan = async (req, res) => {
     if (!plan || !plan.isActive) return res.status(404).json(notFound("Token plan not found or inactive"));
 
     // Payment is assumed successful (integrate gateway later)
-    const wallet = await creditTokens(driverId, plan.tokensAmount, `Purchase plan ${plan.name}`, driverId);
+    const wallet = await creditTokens(driverId, plan.tokensAmount, `Purchase plan ${plan.name}`, driverId, plan._id);
 
     const responseData = { walletBalance: wallet.balance, tokensCredited: plan.tokensAmount, plan: { id: plan._id, name: plan.name } };
     return res.status(201).json(created(responseData, "Tokens purchased and credited"));
@@ -127,6 +127,10 @@ exports.credit = async (req, res) => {
     const { error, value } = tokenSchemas.walletCredit.validate(req.body, { abortEarly: false, stripUnknown: true });
     if (error) return res.status(400).json(badRequest("Validation failed", error.details));
 
+    if (!Types.ObjectId.isValid(value.driverId)) return res.status(400).json(badRequest("Invalid driverId format"));
+    const driver = await users.findById(value.driverId);
+    if (!driver || !driver.isActive) return res.status(404).json(notFound("Driver not found or inactive"));
+
     const wallet = await creditTokens(value.driverId, value.amount, value.reason || "Manual credit", req.user.user_id);
     return res.status(201).json(created({ balance: wallet.balance }, "Wallet credited"));
   } catch (err) {
@@ -139,6 +143,10 @@ exports.debit = async (req, res) => {
   try {
     const { error, value } = tokenSchemas.walletDebit.validate(req.body, { abortEarly: false, stripUnknown: true });
     if (error) return res.status(400).json(badRequest("Validation failed", error.details));
+
+    if (!Types.ObjectId.isValid(value.driverId)) return res.status(400).json(badRequest("Invalid driverId format"));
+    const driver = await users.findById(value.driverId);
+    if (!driver || !driver.isActive) return res.status(404).json(notFound("Driver not found or inactive"));
 
     try {
       const wallet = await debitTokens(value.driverId, value.amount, value.reason || "Manual debit", req.user.user_id);

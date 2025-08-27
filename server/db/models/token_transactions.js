@@ -8,6 +8,7 @@ const tokenTransactionSchema = new mongoose.Schema(
     reason: { type: String, trim: true },
     reference: { type: String, trim: true },
     addedBy: { type: mongoose.Schema.Types.ObjectId, ref: "users" },
+    plan: { type: mongoose.Schema.Types.ObjectId, ref: "token_purchase_plans" },
   },
   {
     timestamps: true,
