@@ -184,6 +184,10 @@ exports.createLeadTokens = async (req, res) => {
         { distanceKmFrom: { $lt: value.distanceKmTo }, distanceKmTo: { $gte: value.distanceKmTo } },
       ],
     });
+    // const overlap = await LeadTokens.findOne({
+    //   distanceKmFrom: { $lt: value.distanceKmTo },
+    //   distanceKmTo: { $gte: value.distanceKmFrom }
+    // });    
     if (overlap) return res.status(409).json(badRequest("Overlapping distance band exists"));
 
     const band = await LeadTokens.create({ ...value, addedBy: req.user.user_id });
@@ -199,6 +203,25 @@ exports.updateLeadTokens = async (req, res) => {
     const { bandId } = req.params;
     const { error, value } = tokenSchemas.leadTokensUpdate.validate(req.body, { abortEarly: false, stripUnknown: true });
     if (error) return res.status(400).json(badRequest("Validation failed", error.details));
+
+    // Overlap check if range fields provided
+    if (value.distanceKmFrom !== undefined || value.distanceKmTo !== undefined) {
+      // Fetch current to fill missing ends
+      const current = await LeadTokens.findById(bandId);
+      if (!current) return res.status(404).json(notFound("Lead tokens band not found"));
+      const from = value.distanceKmFrom !== undefined ? value.distanceKmFrom : current.distanceKmFrom;
+      const to = value.distanceKmTo !== undefined ? value.distanceKmTo : current.distanceKmTo;
+
+      const overlap = await LeadTokens.findOne({
+        _id: { $ne: bandId },
+        $or: [
+          { distanceKmFrom: { $lte: from }, distanceKmTo: { $gt: from } },
+          { distanceKmFrom: { $lt: to }, distanceKmTo: { $gte: to } },
+          { distanceKmFrom: { $gte: from }, distanceKmTo: { $lte: to } },
+        ],
+      });
+      if (overlap) return res.status(409).json(badRequest("Overlapping distance band exists"));
+    }
 
     const band = await LeadTokens.findByIdAndUpdate(bandId, { ...value, lastUpdatedBy: req.user.user_id, updatedAt: new Date() }, { new: true });
     if (!band) return res.status(404).json(notFound("Lead tokens band not found"));
@@ -257,6 +280,25 @@ exports.updateTripTokens = async (req, res) => {
     const { bandId } = req.params;
     const { error, value } = tokenSchemas.tripTokensUpdate.validate(req.body, { abortEarly: false, stripUnknown: true });
     if (error) return res.status(400).json(badRequest("Validation failed", error.details));
+
+    // Overlap check if range fields provided
+    if (value.distanceKmFrom !== undefined || value.distanceKmTo !== undefined) {
+      // Fetch current to fill missing ends
+      const current = await TripTokens.findById(bandId);
+      if (!current) return res.status(404).json(notFound("Trip tokens band not found"));
+      const from = value.distanceKmFrom !== undefined ? value.distanceKmFrom : current.distanceKmFrom;
+      const to = value.distanceKmTo !== undefined ? value.distanceKmTo : current.distanceKmTo;
+
+      const overlap = await TripTokens.findOne({
+        _id: { $ne: bandId },
+        $or: [
+          { distanceKmFrom: { $lte: from }, distanceKmTo: { $gt: from } },
+          { distanceKmFrom: { $lt: to }, distanceKmTo: { $gte: to } },
+          { distanceKmFrom: { $gte: from }, distanceKmTo: { $lte: to } },
+        ],
+      });
+      if (overlap) return res.status(409).json(badRequest("Overlapping distance band exists"));
+    }
 
     const band = await TripTokens.findByIdAndUpdate(bandId, { ...value, lastUpdatedBy: req.user.user_id, updatedAt: new Date() }, { new: true });
     if (!band) return res.status(404).json(notFound("Trip tokens band not found"));
