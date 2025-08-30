@@ -38,6 +38,7 @@ const driverConnectionRoutes = require("./routes/driverConnectionRoutes");
 const locationRoutes = require("./routes/locationRoutes");
 const subscriptionRoutes = require("./routes/subscriptionRoutes");
 const tokenRoutes = require("./routes/tokenRoutes");
+const connectRequestRoutes = require("./routes/connectRequestRoutes");
 
 // Passport configuration
 const passport = require("passport");
@@ -140,7 +141,8 @@ app.get("/", (req, res) => {
         documents: "/documents",
         driverConnections: "/driver-connections",
         subscriptions: "/subscriptions",
-        tokens: "/tokens"
+        tokens: "/tokens",
+        connectRequests: "/connect-requests"
       },
     documentation: process.env.API_DOCS_URL || "Documentation not available"
   });
@@ -167,6 +169,7 @@ apiV1.use("/driver-connections", driverConnectionRoutes);
 apiV1.use("/locations", locationRoutes);
 apiV1.use("/subscriptions", subscriptionRoutes);
 apiV1.use("/tokens", tokenRoutes);
+apiV1.use("/connect-requests", connectRequestRoutes);
 
 // Mount API version
 app.use("/api/v1", apiV1);

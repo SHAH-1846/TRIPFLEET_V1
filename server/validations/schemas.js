@@ -588,6 +588,25 @@ const tokenSchemas = {
   }),
 };
 
+// Connect Request Schemas
+const connectRequestSchemas = {
+  sendRequest: Joi.object({
+    recipientId: fields.objectId,
+    customerRequestId: fields.objectId.required(),
+    tripId: fields.objectId.required(),
+    message: Joi.string().trim().max(500).optional(),
+  }),
+
+  respondToRequest: Joi.object({
+    action: Joi.string().valid("accept", "reject").required(),
+    rejectionReason: Joi.string().trim().max(200).optional(),
+  }),
+
+  acceptRequest: Joi.object({
+    rejectionReason: Joi.string().trim().max(200).optional(),
+  }),
+};
+
 module.exports = {
   authSchemas,
   userSchemas,
@@ -602,4 +621,5 @@ module.exports = {
   patterns,
   fields,
   tokenSchemas,
+  connectRequestSchemas,
 };
