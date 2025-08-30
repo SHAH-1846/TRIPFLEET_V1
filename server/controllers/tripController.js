@@ -13,6 +13,9 @@ const bookings = require("../db/models/bookings");
 require("../db/models/goods_accepted");
 require("../db/models/trip_status");
 
+// Token controller for calculations and deductions
+const tokenController = require("./tokenController");
+
 // Utils
 const {
   success,
@@ -29,6 +32,26 @@ const {
 
 // Validation schemas
 const { tripSchemas } = require("../validations/schemas");
+
+// Helper function to calculate distance between two points in kilometers
+const calculateDistance = (lat1, lon1, lat2, lon2) => {
+  const R = 6371; // Radius of the earth in km
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  const distance = R * c; // Distance in km
+  return distance;
+};
+
+// Helper function to calculate trip distance from coordinates
+const calculateTripDistance = (startCoords, endCoords) => {
+  const [startLng, startLat] = startCoords;
+  const [endLng, endLat] = endCoords;
+  return calculateDistance(startLat, startLng, endLat, endLng);
+};
 
 /**
  * Validate vehicle ownership
@@ -238,6 +261,27 @@ exports.createTrip = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
+    // Calculate trip distance and required tokens
+    const tripDistance = calculateTripDistance(
+      value.tripStartLocation.coordinates,
+      value.tripDestination.coordinates
+    );
+    const tokensRequired = await tokenController.calculateTripTokens(value.distance.value);
+
+    // Check if driver has sufficient tokens
+    if (tokensRequired > 0) {
+      const TokenWallet = require("../db/models/token_wallets");
+      let wallet = await TokenWallet.findOne({ driver: userId });
+      if (!wallet) {
+        wallet = await TokenWallet.create({ driver: userId, balance: 0 });
+      }
+      
+      if (wallet.balance < tokensRequired) {
+        const response = badRequest(`Insufficient tokens. Required: ${tokensRequired}, Available: ${wallet.balance}`);
+        return res.status(response.statusCode).json(response);
+      }
+    }
+
     // Determine routeGeoJSON coordinates
     let routeGeoJSONCoordinates = [];
     console.log("routeGeoJSON from request:", value.routeGeoJSON);
@@ -305,9 +349,18 @@ exports.createTrip = async (req, res) => {
       ...(value.distance && { distance: value.distance }),
       ...(value.duration && { duration: value.duration })
     };
-    console.log("tripData", tripData);
 
     const newTrip = await trips.create(tripData);
+
+    // Deduct tokens if required
+    if (tokensRequired > 0) {
+      try {
+        await tokenController.debitTokens(userId, tokensRequired, `Trip creation: ${value.title}`, userId);
+      } catch (error) {
+        console.error("Token deduction failed:", error);
+        // Continue with trip creation even if token deduction fails
+      }
+    }
 
     // Populate trip data for response
     const populatedTrip = await trips.findById(newTrip._id)
@@ -318,7 +371,11 @@ exports.createTrip = async (req, res) => {
       .populate('status', 'name description');
 
     const response = created(
-      { trip: populatedTrip },
+      { 
+        trip: populatedTrip,
+        tokensDeducted: tokensRequired,
+        tripDistance: tripDistance
+      },
       "Trip created successfully"
     );
 
@@ -978,6 +1035,36 @@ exports.updateTrip = async (req, res) => {
       }
     }
 
+    // Calculate token changes if distance is being updated
+    let tokenChange = 0;
+    
+    if (value.distance?.value !== undefined) {
+      // Get old distance from database record
+      const oldDistance = trip.distance?.value || 0;
+      
+      // Get new distance from payload
+      const newDistance = value.distance.value;
+      
+      // Calculate token difference
+      const oldTokens = await tokenController.calculateTripTokens(oldDistance);
+      const newTokens = await tokenController.calculateTripTokens(newDistance);
+      tokenChange = newTokens - oldTokens;
+      
+      // If tokens increased, check if driver has sufficient balance
+      if (tokenChange > 0) {
+        const TokenWallet = require("../db/models/token_wallets");
+        let wallet = await TokenWallet.findOne({ driver: userId });
+        if (!wallet) {
+          wallet = await TokenWallet.create({ driver: userId, balance: 0 });
+        }
+        
+        if (wallet.balance < tokenChange) {
+          const response = badRequest(`Insufficient tokens for distance increase. Required: ${tokenChange}, Available: ${wallet.balance}`);
+          return res.status(response.statusCode).json(response);
+        }
+      }
+    }
+
     // Update trip
     const updatedTrip = await trips.findByIdAndUpdate(
       tripId,
@@ -993,8 +1080,27 @@ exports.updateTrip = async (req, res) => {
       .populate('goodsType', 'name description')
       .populate('status', 'name description');
 
+    // Handle token changes
+    if (tokenChange !== 0) {
+      try {
+        if (tokenChange > 0) {
+          // Deduct additional tokens for distance increase
+          await tokenController.debitTokens(userId, tokenChange, `Trip update: distance increased`, userId);
+        } else if (tokenChange < 0) {
+          // Refund tokens for distance decrease
+          await tokenController.creditTokens(userId, Math.abs(tokenChange), `Trip update: distance decreased`, userId);
+        }
+      } catch (error) {
+        console.error("Token adjustment failed:", error);
+        // Continue with trip update even if token adjustment fails
+      }
+    }
+
     const response = updated(
-      { trip: updatedTrip },
+      { 
+        trip: updatedTrip,
+        tokenChange: tokenChange
+      },
       "Trip updated successfully"
     );
 

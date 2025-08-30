@@ -373,6 +373,16 @@ exports.registerProfile = async (req, res) => {
       });
     }
 
+    // Credit free tokens if user is a driver and free token settings are configured
+    if (value.user_type.toString() === DRIVER_USER_TYPE_ID) {
+      try {
+        await FreeToken.creditFreeTokensIfAny(newUser._id);
+      } catch (error) {
+        console.error("Failed to credit free tokens:", error);
+        // Don't fail registration if token credit fails
+      }
+    }
+
     // Clean up OTP record
     await OTP.findByIdAndDelete(otpRecord._id);
 

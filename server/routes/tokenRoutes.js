@@ -26,6 +26,10 @@ router.post('/wallet/debit', authenticateToken, requireRole(['admin']), sanitize
 // Driver: wallet balance
 router.get('/wallet/balance', authenticateToken, requireRole(['driver']), tokenController.balance);
 
+// Token usage calculation
+router.get('/usage/trip', authenticateToken, requireRole(['driver', 'admin']), tokenController.getTripTokenUsage);
+router.get('/usage/lead', authenticateToken, requireRole(['driver', 'admin']), tokenController.getLeadTokenUsage);
+
 // Admin: token usage bands for leads
 router.post('/lead-bands', authenticateToken, requireRole(['admin']), sanitizeInput, tokenController.createLeadTokens);
 router.put('/lead-bands/:bandId', authenticateToken, requireRole(['admin']), validateObjectId('bandId'), sanitizeInput, tokenController.updateLeadTokens);

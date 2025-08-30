@@ -350,6 +350,67 @@ exports.upsertFreeTokenSettings = async (req, res) => {
   }
 };
 
+// Token usage calculation helpers
+const calculateTokensForDistance = async (distanceKm, tokenBands) => {
+  const band = await tokenBands.findOne({
+    distanceKmFrom: { $lte: distanceKm },
+    distanceKmTo: { $gt: distanceKm },
+    isActive: true,
+  });
+  return band ? band.tokensRequired : 0;
+};
+
+const calculateTripTokens = async (distanceKm) => {
+  return calculateTokensForDistance(distanceKm, TripTokens);
+};
+
+const calculateLeadTokens = async (distanceKm) => {
+  return calculateTokensForDistance(distanceKm, LeadTokens);
+};
+
+// View token usage APIs
+exports.getTripTokenUsage = async (req, res) => {
+  try {
+    const { distanceKm } = req.query;
+    if (!distanceKm || isNaN(distanceKm) || distanceKm < 0) {
+      return res.status(400).json(badRequest("Valid distanceKm query parameter required"));
+    }
+
+    const tokensRequired = await calculateTripTokens(parseFloat(distanceKm));
+    const bands = await TripTokens.find({ isActive: true }).sort({ distanceKmFrom: 1 });
+
+    return res.json(success({
+      distanceKm: parseFloat(distanceKm),
+      tokensRequired,
+      availableBands: bands,
+    }, "Trip token usage calculated"));
+  } catch (err) {
+    console.error("getTripTokenUsage error", err);
+    return res.status(500).json(serverError("Failed to calculate trip token usage"));
+  }
+};
+
+exports.getLeadTokenUsage = async (req, res) => {
+  try {
+    const { distanceKm } = req.query;
+    if (!distanceKm || isNaN(distanceKm) || distanceKm < 0) {
+      return res.status(400).json(badRequest("Valid distanceKm query parameter required"));
+    }
+
+    const tokensRequired = await calculateLeadTokens(parseFloat(distanceKm));
+    const bands = await LeadTokens.find({ isActive: true }).sort({ distanceKmFrom: 1 });
+
+    return res.json(success({
+      distanceKm: parseFloat(distanceKm),
+      tokensRequired,
+      availableBands: bands,
+    }, "Lead token usage calculated"));
+  } catch (err) {
+    console.error("getLeadTokenUsage error", err);
+    return res.status(500).json(serverError("Failed to calculate lead token usage"));
+  }
+};
+
 // Hook: credit free tokens to driver (to be called post-registration)
 exports.creditFreeTokensIfAny = async (driverId) => {
   const settings = await FreeTokenSettings.findOne({ isActive: true });
@@ -357,3 +418,9 @@ exports.creditFreeTokensIfAny = async (driverId) => {
   const wallet = await creditTokens(driverId, settings.tokensOnRegistration, "Free tokens on registration", null);
   return wallet;
 };
+
+// Export calculation functions for use in other controllers
+exports.calculateTripTokens = calculateTripTokens;
+exports.calculateLeadTokens = calculateLeadTokens;
+exports.creditTokens = creditTokens;
+exports.debitTokens = debitTokens;
