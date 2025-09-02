@@ -74,6 +74,23 @@ exports.sendRequest = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
+    // Enforce role pairing: driver <-> customer
+    const initiatorType = await user_types.findById(user.user_type);
+    const recipientType = await user_types.findById(recipient.user_type);
+    if (!initiatorType || !recipientType) {
+      const response = badRequest("Invalid user types for initiator or recipient");
+      return res.status(response.statusCode).json(response);
+    }
+    const isInitiatorDriver = initiatorType.name?.toLowerCase() === "driver";
+    const isInitiatorCustomer = initiatorType.name?.toLowerCase() === "customer";
+    const isRecipientDriver = recipientType.name?.toLowerCase() === "driver";
+    const isRecipientCustomer = recipientType.name?.toLowerCase() === "customer";
+
+    if (!(isInitiatorDriver && isRecipientCustomer) && !(isInitiatorCustomer && isRecipientDriver)) {
+      const response = badRequest("Invalid pairing: driver must connect with customer and vice versa");
+      return res.status(response.statusCode).json(response);
+    }
+
     // Validate both customer request and trip exist and are active
     const customerRequest = await customer_requests.findById(value.customerRequestId);
     if (!customerRequest || !customerRequest.isActive) {
@@ -85,6 +102,29 @@ exports.sendRequest = async (req, res) => {
     if (!trip || !trip.isActive) {
       const response = notFound("Trip not found or inactive");
       return res.status(response.statusCode).json(response);
+    }
+
+    // Cross-ownership validation:
+    // If initiator is driver, then trip must be added by initiator and customerRequest must be created by recipient
+    // If initiator is customer, then customerRequest must be created by initiator and trip must be added by recipient
+    if (isInitiatorDriver) {
+      if (!trip.tripAddedBy || trip.tripAddedBy.toString() !== userId) {
+        const response = badRequest("Trip does not belong to the driver (initiator)");
+        return res.status(response.statusCode).json(response);
+      }
+      if (!customerRequest.user || customerRequest.user.toString() !== value.recipientId) {
+        const response = badRequest("Customer request does not belong to the customer (recipient)");
+        return res.status(response.statusCode).json(response);
+      }
+    } else if (isInitiatorCustomer) {
+      if (!customerRequest.user || customerRequest.user.toString() !== userId) {
+        const response = badRequest("Customer request does not belong to the customer (initiator)");
+        return res.status(response.statusCode).json(response);
+      }
+      if (!trip.tripAddedBy || trip.tripAddedBy.toString() !== value.recipientId) {
+        const response = badRequest("Trip does not belong to the driver (recipient)");
+        return res.status(response.statusCode).json(response);
+      }
     }
 
     // Check if connect request already exists
@@ -109,8 +149,7 @@ exports.sendRequest = async (req, res) => {
     tokensRequired = await tokenController.calculateLeadTokens(distanceKm);
     
     // Check if initiator has sufficient tokens (only for drivers)
-    const userType = await user_types.findById(user.user_type);
-    if (userType.name === "driver") {
+    if (isInitiatorDriver) {
       const TokenWallet = require("../db/models/token_wallets");
       const wallet = await TokenWallet.findOne({ driver: userId });
       hasSufficientTokens = wallet && wallet.balance >= tokensRequired;
@@ -148,6 +187,10 @@ exports.sendRequest = async (req, res) => {
     return res.status(response.statusCode).json(response);
   } catch (error) {
     console.error("Send connect request error:", error);
+    if (error && error.code === 11000) {
+      const response = conflict("A connect request for this customerRequest and trip between these users already exists");
+      return res.status(response.statusCode).json(response);
+    }
     const response = serverError("Failed to send connect request");
     return res.status(response.statusCode).json(response);
   }
