@@ -91,6 +91,17 @@ router.delete('/:requestId',
   connectRequestController.deleteConnectRequest
 );
 
+/**
+ * @route GET /api/v1/connect-requests/:requestId/contacts
+ * @desc Get contact visibility and details based on acceptance and caller
+ * @access Private (initiator or recipient)
+ */
+router.get('/:requestId/contacts',
+  authenticateToken,
+  validateObjectId('requestId'),
+  connectRequestController.getContactDetails
+);
+
 // Get connect request verification details for cross-checking
 router.get(
   "/:requestId/verification",

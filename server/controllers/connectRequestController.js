@@ -256,56 +256,73 @@ exports.respondToRequest = async (req, res) => {
       // Handle acceptance
       updateData = {
         ...updateData,
-        status: "accepted",
         recipientAccepted: true,
         acceptedAt: new Date(),
       };
 
-      // If this is a lead and the initiator is a driver, check tokens
-      if (connectRequest.customerRequest) {
-        const initiator = await users.findById(connectRequest.initiator);
-        const initiatorType = await user_types.findById(initiator.user_type);
-        
-        if (initiatorType.name === "driver") {
-          // Check if driver has sufficient tokens
-          if (!connectRequest.hasSufficientTokens) {
-            updateData.status = "pending";
-            updateData.recipientAccepted = false;
-            updateData.acceptedAt = null;
-            
-            const updatedRequest = await connect_requests.findByIdAndUpdate(
-              requestId,
-              updateData,
-              { new: true }
-            );
+      // Compute tokens from lead distance always (customerRequest)
+      const customerRequest = await customer_requests.findById(connectRequest.customerRequest);
+      const distanceKm = (customerRequest?.distance?.value || 0) / 1000;
+      const tokensRequired = await tokenController.calculateLeadTokens(distanceKm);
+      updateData["tokenDeduction.tokensRequired"] = tokensRequired;
 
-            const response = badRequest(
-              "Your connectRequest was accepted by the customer, but you do not have enough tokens to view this lead's contact details."
-            );
-            return res.status(response.statusCode).json(response);
-          }
+      // Determine who is driver: initiator or recipient
+      const initiatorUser = await users.findById(connectRequest.initiator);
+      const recipientUser = await users.findById(connectRequest.recipient);
+      const initiatorType = await user_types.findById(initiatorUser.user_type);
+      const recipientType = await user_types.findById(recipientUser.user_type);
+      const initiatorIsDriver = initiatorType?.name?.toLowerCase() === "driver";
+      const recipientIsDriver = recipientType?.name?.toLowerCase() === "driver";
 
-          // Deduct tokens from driver's wallet
-          try {
-            await tokenController.debitTokens(
-              connectRequest.initiator,
-              connectRequest.tokenDeduction.tokensRequired,
-              `Connect request accepted for lead: ${connectRequest.customerRequest}`,
-              userId
-            );
+      // Deduction logic: deduct from whichever party is driver when connectRequest moves to accepted
+      // If recipient is driver but lacks tokens -> block acceptance
+      // If recipient is customer and initiator (driver) lacks tokens -> accept but put on hold
+      const TokenWallet = require("../db/models/token_wallets");
 
-            updateData["tokenDeduction.tokensDeducted"] = connectRequest.tokenDeduction.tokensRequired;
-            updateData["tokenDeduction.deductedAt"] = new Date();
-          } catch (error) {
-            console.error("Token deduction failed:", error);
-            const response = badRequest("Insufficient tokens to accept this request");
-            return res.status(response.statusCode).json(response);
-          }
+      if (recipientIsDriver) {
+        // Recipient must have tokens now
+        const wallet = await TokenWallet.findOne({ driver: connectRequest.recipient });
+        const hasTokens = wallet && wallet.balance >= tokensRequired;
+        if (!hasTokens) {
+          const response = badRequest("Insufficient tokens to accept this request");
+          return res.status(response.statusCode).json(response);
         }
+        // Deduct from recipient (driver)
+        await tokenController.debitTokens(
+          connectRequest.recipient,
+          tokensRequired,
+          `Connect request accepted for lead: ${connectRequest.customerRequest}`,
+          userId
+        );
+        updateData["tokenDeduction.tokensDeducted"] = tokensRequired;
+        updateData["tokenDeduction.deductedAt"] = new Date();
+        updateData.status = "accepted";
+      } else if (initiatorIsDriver) {
+        // Initiator must have tokens; if not, set hold
+        const wallet = await TokenWallet.findOne({ driver: connectRequest.initiator });
+        const hasTokens = wallet && wallet.balance >= tokensRequired;
+        if (!hasTokens) {
+          // Initiator lacks tokens and recipient is customer => hold
+          updateData.status = "hold";
+        } else {
+          // Deduct from initiator (driver)
+          await tokenController.debitTokens(
+            connectRequest.initiator,
+            tokensRequired,
+            `Connect request accepted for lead: ${connectRequest.customerRequest}`,
+            userId
+          );
+          updateData["tokenDeduction.tokensDeducted"] = tokensRequired;
+          updateData["tokenDeduction.deductedAt"] = new Date();
+          updateData.status = "accepted";
+        }
+      } else {
+        // Neither side is a driver; default to accepted without tokens
+        updateData.status = "accepted";
       }
 
-      // Check if both parties have accepted (for mutual acceptance)
-      if (connectRequest.initiatorAccepted) {
+      // Mutual acceptance -> share contacts only if status is accepted
+      if (connectRequest.initiatorAccepted && updateData.status === "accepted") {
         updateData.contactDetailsShared = true;
         updateData.contactDetailsSharedAt = new Date();
       }
@@ -314,6 +331,8 @@ exports.respondToRequest = async (req, res) => {
       updateData = {
         ...updateData,
         status: "rejected",
+        recipientAccepted: false,
+        acceptedAt: null,
         rejectedAt: new Date(),
         rejectionReason: value.rejectionReason,
       };
@@ -774,6 +793,120 @@ exports.getConnectRequestVerification = async (req, res) => {
   } catch (error) {
     console.error("Get connect request verification error:", error);
     const response = serverError("Failed to retrieve verification details");
+    return res.status(response.statusCode).json(response);
+  }
+};
+
+/**
+ * Get contact details visibility decision
+ * Shows recipient's details to initiator or initiator's details to recipient when status is accepted
+ * Blocks if requester is not initiator or recipient
+ * @route GET /api/v1/connect-requests/:requestId/contacts
+ */
+exports.getContactDetails = async (req, res) => {
+  try {
+    const { requestId } = req.params;
+    const userId = req.user.user_id;
+
+    // Validate requester
+    const user = await users.findById(userId);
+    if (!user || !user.isActive) {
+      const response = unauthorized("User not found or inactive");
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Fetch connect request
+    let connectRequest = await connect_requests
+      .findById(requestId)
+      .populate("initiator", "name email phone whatsappNumber user_type")
+      .populate("recipient", "name email phone whatsappNumber user_type");
+
+    if (!connectRequest || !connectRequest.isActive) {
+      const response = notFound("Connect request not found");
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Block if user is not initiator or recipient
+    const isInitiator = connectRequest.initiator._id.toString() === userId;
+    const isRecipient = connectRequest.recipient._id.toString() === userId;
+    if (!(isInitiator || isRecipient)) {
+      const response = forbidden("Access denied");
+      return res.status(response.statusCode).json(response);
+    }
+
+    // If status is hold and requester is driver, re-check wallet and attempt deduction
+    if (connectRequest.status === "hold") {
+      const requesterType = await user_types.findById(isInitiator ? connectRequest.initiator.user_type : connectRequest.recipient.user_type);
+      const requesterIsDriver = requesterType?.name?.toLowerCase() === "driver";
+
+      if (requesterIsDriver) {
+        // Determine tokens required (use stored or recompute from lead distance)
+        let tokensRequired = connectRequest?.tokenDeduction?.tokensRequired || 0;
+        if (!tokensRequired || tokensRequired <= 0) {
+          const customerRequestDoc = await customer_requests.findById(connectRequest.customerRequest);
+          const distanceKm = (customerRequestDoc?.distance?.value || 0) / 1000;
+          tokensRequired = await tokenController.calculateLeadTokens(distanceKm);
+        }
+
+        // Check wallet and attempt debit
+        const TokenWallet = require("../db/models/token_wallets");
+        const wallet = await TokenWallet.findOne({ driver: userId });
+        const hasTokens = wallet && wallet.balance >= tokensRequired;
+        if (!hasTokens) {
+          const response = badRequest("Not enough tokens to view contact details");
+          return res.status(response.statusCode).json(response);
+        }
+
+        // Debit and promote to accepted
+        await tokenController.debitTokens(
+          userId,
+          tokensRequired,
+          `Connect request (hold->accepted) for lead: ${connectRequest.customerRequest}`,
+          userId
+        );
+
+        await connect_requests.findByIdAndUpdate(requestId, {
+          status: "accepted",
+          "tokenDeduction.tokensRequired": tokensRequired,
+          "tokenDeduction.tokensDeducted": tokensRequired,
+          "tokenDeduction.deductedAt": new Date(),
+          lastUpdatedBy: userId,
+          updatedAt: new Date(),
+        });
+
+        // Refresh the document
+        connectRequest = await connect_requests
+          .findById(requestId)
+          .populate("initiator", "name email phone whatsappNumber user_type")
+          .populate("recipient", "name email phone whatsappNumber user_type");
+      }
+    }
+
+    // Only show contact details on accepted
+    if (connectRequest.status !== "accepted") {
+      const response = success({ show: false, contact: null }, "Contact details are hidden for this request");
+      return res.status(response.statusCode).json(response);
+    }
+
+    const contact = isInitiator
+      ? {
+          name: connectRequest.recipient.name,
+          email: connectRequest.recipient.email,
+          phone: connectRequest.recipient.phone,
+          whatsappNumber: connectRequest.recipient.whatsappNumber,
+        }
+      : {
+          name: connectRequest.initiator.name,
+          email: connectRequest.initiator.email,
+          phone: connectRequest.initiator.phone,
+          whatsappNumber: connectRequest.initiator.whatsappNumber,
+        };
+
+    const response = success({ show: true, contact }, "Contact details available");
+    return res.status(response.statusCode).json(response);
+  } catch (error) {
+    console.error("Get contact details error:", error);
+    const response = serverError("Failed to retrieve contact details");
     return res.status(response.statusCode).json(response);
   }
 };
