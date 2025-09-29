@@ -973,6 +973,13 @@ exports.updateTrip = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
+    // Block updates when there is a confirmed booking for this trip
+    const confirmedBooking = await bookings.findOne({ trip: tripId, status: 'confirmed' });
+    if (confirmedBooking) {
+      const response = badRequest("Trip cannot be edited after booking confirmation");
+      return res.status(response.statusCode).json(response);
+    }
+
     // Check if trip can be updated (not completed or cancelled)
     if (['completed', 'cancelled'].includes(trip.status)) {
       const response = badRequest("Cannot update completed or cancelled trip");

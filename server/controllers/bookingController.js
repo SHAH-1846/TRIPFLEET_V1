@@ -10,6 +10,9 @@ const bookings = require("../db/models/bookings");
 const trips = require("../db/models/trips");
 const vehicles = require("../db/models/vehicles");
 const users = require("../db/models/users");
+const customer_requests = require("../db/models/customer_requests");
+const connect_requests = require("../db/models/connect_requests");
+const customer_request_status = require("../db/models/customer_request_status");
 
 // Utils
 const { 
@@ -59,86 +62,97 @@ exports.createBooking = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
-    // Check if user is a driver
+    // Allow both roles to initiate a booking using identifiers
     const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name !== 'driver') {
-      const response = forbidden("Only drivers can create bookings");
-      return res.status(response.statusCode).json(response);
-    }
+    const isDriver = userType.name?.toLowerCase() === 'driver';
+    const isCustomer = userType.name?.toLowerCase() === 'customer';
 
-    // Check if trip exists and is available
-    const trip = await trips.findById(value.trip);
+    const trip = await trips.findById(value.tripId);
     if (!trip || !trip.isActive) {
-      const response = notFound("Trip not found or unavailable");
+      const response = notFound("Trip not found or inactive");
       return res.status(response.statusCode).json(response);
     }
 
-    if (trip.status !== 'pending') {
-      const response = badRequest("Trip is not available for booking");
+    const customerRequest = await customer_requests.findById(value.customerRequestId);
+    if (!customerRequest || !customerRequest.isActive) {
+      const response = notFound("Customer request not found or inactive");
       return res.status(response.statusCode).json(response);
     }
 
-    // Check if vehicle exists and belongs to driver
-    const vehicle = await vehicles.findById(value.vehicle);
-    if (!vehicle || !vehicle.isActive) {
-      const response = notFound("Vehicle not found or unavailable");
+    // Validate role pairing by ownership of trip/customerRequest
+    let driverId, customerId;
+    if (isDriver) {
+      if (!trip.tripAddedBy || trip.tripAddedBy.toString() !== userId) {
+        const response = forbidden("Trip does not belong to the driver (initiator)");
+        return res.status(response.statusCode).json(response);
+      }
+      driverId = userId;
+      customerId = customerRequest.user;
+    } else if (isCustomer) {
+      if (!customerRequest.user || customerRequest.user.toString() !== userId) {
+        const response = forbidden("Customer request does not belong to the customer (initiator)");
+        return res.status(response.statusCode).json(response);
+      }
+      customerId = userId;
+      driverId = trip.tripAddedBy;
+    } else {
+      const response = forbidden("Only drivers or customers can initiate bookings");
       return res.status(response.statusCode).json(response);
     }
 
-    if (vehicle.user.toString() !== userId) {
-      const response = forbidden("Vehicle does not belong to you");
-      return res.status(response.statusCode).json(response);
-    }
-
-    if (!vehicle.isAvailable) {
-      const response = badRequest("Vehicle is not available");
-      return res.status(response.statusCode).json(response);
-    }
-
-    // Check if driver already has a booking for this trip
+    // Prevent duplicate active bookings between same trip and customerRequest
     const existingBooking = await bookings.findOne({
-      trip: value.trip,
-      driver: userId,
-      status: { $in: ['pending', 'confirmed', 'in_progress'] }
+      trip: value.tripId,
+      customerRequest: value.customerRequestId,
+      status: { $in: ['pending', 'confirmed'] }
     });
-
     if (existingBooking) {
-      const response = conflict("You already have a booking for this trip");
+      const response = conflict("A booking already exists for this trip and customer request");
       return res.status(response.statusCode).json(response);
     }
 
-    // Validate pickup date is in the future
-    const pickupDate = new Date(value.pickupDate);
-    const now = new Date();
-    if (pickupDate <= now) {
+    // If provided, associate connectRequest
+    let connectRequestId = null;
+    if (value.connectRequestId) {
+      const conn = await connect_requests.findById(value.connectRequestId);
+      if (!conn || !conn.isActive) {
+        const response = badRequest("Invalid connect request");
+        return res.status(response.statusCode).json(response);
+      }
+      connectRequestId = conn._id;
+    }
+
+    // Optional pickupDate validation
+    let pickupDate = value.pickupDate ? new Date(value.pickupDate) : null;
+    if (pickupDate && pickupDate <= new Date()) {
       const response = badRequest("Pickup date must be in the future");
       return res.status(response.statusCode).json(response);
     }
 
-    // Create booking with enhanced data
     const bookingData = {
-      trip: value.trip,
-      driver: userId,
-      vehicle: value.vehicle,
+      trip: value.tripId,
+      customerRequest: value.customerRequestId,
+      driver: driverId,
+      customer: customerId,
+      initiator: userId,
+      recipient: isDriver ? customerId : driverId,
+      connectRequest: connectRequestId,
       price: value.price,
-      pickupDate: pickupDate,
+      pickupDate: pickupDate || undefined,
       notes: value.notes,
       status: 'pending',
-      isActive: true
+      isActive: true,
     };
 
     const newBooking = await bookings.create(bookingData);
 
     // Populate booking data for response
     const populatedBooking = await bookings.findById(newBooking._id)
-      .populate('trip', 'pickupLocation dropLocation goodsType weight budget')
+      .populate('trip')
       .populate('driver', 'name email phone')
-      .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType');
+      .populate('customer', 'name email phone');
 
-    const response = created(
-      { booking: populatedBooking },
-      "Booking created successfully"
-    );
+    const response = created({ booking: populatedBooking }, "Booking initiated successfully");
 
     return res.status(response.statusCode).json(response);
 
@@ -404,15 +418,9 @@ exports.acceptBooking = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
-    // Check if user can accept this booking (trip owner)
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name !== 'customer') {
-      const response = forbidden("Only customers can accept bookings");
-      return res.status(response.statusCode).json(response);
-    }
-
-    if (booking.trip.customer.toString() !== userId) {
-      const response = forbidden("Access denied");
+    // Only the recipient can accept
+    if (booking.recipient.toString() !== userId) {
+      const response = forbidden("Only the recipient can accept this booking");
       return res.status(response.statusCode).json(response);
     }
 
@@ -423,37 +431,44 @@ exports.acceptBooking = async (req, res) => {
     }
 
     // Check if trip is still available
-    if (booking.trip.status !== 'pending') {
-      const response = badRequest("Trip is no longer available");
+    // If the trip has a confirmed booking, block
+    const confirmedExists = await bookings.findOne({ trip: booking.trip._id, status: 'confirmed' });
+    if (confirmedExists) {
+      const response = badRequest("Trip already has a confirmed booking");
       return res.status(response.statusCode).json(response);
     }
 
-    // Accept booking and update trip status
+    // Accept booking and set confirmed
     const updatedBooking = await bookings.findByIdAndUpdate(
       bookingId,
       { 
         status: 'confirmed',
-        confirmedAt: new Date(),
+        recipientAccepted: true,
+        acceptedAt: new Date(),
         updatedAt: new Date()
       },
       { new: true }
     )
-    .populate('trip', 'pickupLocation dropLocation goodsType weight budget status')
+    .populate('trip')
     .populate('driver', 'name email phone')
-    .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType');
+    .populate('customer', 'name email phone');
 
-    // Update trip status
-    await trips.findByIdAndUpdate(booking.trip._id, {
-      status: 'confirmed',
-      driver: booking.driver,
-      vehicle: booking.vehicle,
-      updatedAt: new Date()
+    // Business rules on acceptance:
+    // 1) Update customerRequest status -> booked (684da132412825ef8b404715)
+    const BOOKED_STATUS_ID = '684da132412825ef8b404715';
+    await customer_requests.findByIdAndUpdate(booking.customerRequest, {
+      status: BOOKED_STATUS_ID,
+      updatedAt: new Date(),
     });
 
-    // Reject other pending bookings for this trip
+    // 2) Block trip edits by marking trip status to a suitable locked state (e.g., confirmed status id if using ref)
+    // Here we only prevent via logic in trip update; but we also set updatedAt
+    await trips.findByIdAndUpdate(booking.trip._id, { updatedAt: new Date() });
+
+    // 3) Reject other pending bookings for this trip OR same customerRequest
     await bookings.updateMany(
       { 
-        trip: booking.trip._id,
+        $or: [ { trip: booking.trip._id }, { customerRequest: booking.customerRequest } ],
         _id: { $ne: bookingId },
         status: 'pending'
       },
@@ -461,6 +476,20 @@ exports.acceptBooking = async (req, res) => {
         status: 'rejected',
         rejectedAt: new Date(),
         updatedAt: new Date()
+      }
+    );
+
+    // 4) Auto-cancel pending connectRequests of this customerRequest (both directions) not yet accepted
+    await connect_requests.updateMany(
+      {
+        customerRequest: booking.customerRequest,
+        status: { $in: ['pending', 'hold'] },
+        isActive: true,
+      },
+      {
+        status: 'rejected',
+        rejectedAt: new Date(),
+        updatedAt: new Date(),
       }
     );
 
@@ -503,15 +532,9 @@ exports.rejectBooking = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
-    // Check if user can reject this booking (trip owner)
-    const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name !== 'customer') {
-      const response = forbidden("Only customers can reject bookings");
-      return res.status(response.statusCode).json(response);
-    }
-
-    if (booking.trip.customer.toString() !== userId) {
-      const response = forbidden("Access denied");
+    // Only recipient can reject
+    if (booking.recipient.toString() !== userId) {
+      const response = forbidden("Only the recipient can reject this booking");
       return res.status(response.statusCode).json(response);
     }
 
@@ -531,9 +554,9 @@ exports.rejectBooking = async (req, res) => {
       },
       { new: true }
     )
-    .populate('trip', 'pickupLocation dropLocation goodsType weight budget status')
+    .populate('trip')
     .populate('driver', 'name email phone')
-    .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType');
+    .populate('customer', 'name email phone');
 
     const response = updated(
       { booking: updatedBooking },
@@ -581,7 +604,7 @@ exports.cancelBooking = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
     
-    if (userType.name === 'customer' && booking.trip.customer.toString() !== userId) {
+    if (userType.name === 'customer' && booking.customer.toString() !== userId) {
       const response = forbidden("Access denied");
       return res.status(response.statusCode).json(response);
     }
@@ -603,19 +626,12 @@ exports.cancelBooking = async (req, res) => {
       },
       { new: true }
     )
-    .populate('trip', 'pickupLocation dropLocation goodsType weight budget status')
+    .populate('trip')
     .populate('driver', 'name email phone')
-    .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType');
+    .populate('customer', 'name email phone');
 
     // If booking was confirmed, reset trip status
-    if (booking.status === 'confirmed') {
-      await trips.findByIdAndUpdate(booking.trip._id, {
-        status: 'pending',
-        driver: null,
-        vehicle: null,
-        updatedAt: new Date()
-      });
-    }
+    // No direct trip mutation; flow controlled by status APIs
 
     const response = updated(
       { booking: updatedBooking },
@@ -682,14 +698,12 @@ exports.completeBooking = async (req, res) => {
       },
       { new: true }
     )
-    .populate('trip', 'pickupLocation dropLocation goodsType weight budget status')
+    .populate('trip')
     .populate('driver', 'name email phone')
-    .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType');
+    .populate('customer', 'name email phone');
 
     // Update trip status
     await trips.findByIdAndUpdate(booking.trip, {
-      status: 'completed',
-      completedAt: new Date(),
       updatedAt: new Date()
     });
 

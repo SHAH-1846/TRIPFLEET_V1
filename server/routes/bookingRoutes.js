@@ -29,7 +29,8 @@ const { bookingSchemas } = require('../validations/schemas');
  */
 router.post('/',
   authenticateToken,
-  requireRole(['driver']),
+  // Both drivers and customers can initiate a booking
+  requireRole(['driver', 'customer']),
   sanitizeInput,
   validateRequest(bookingSchemas.createBooking),
   bookingController.createBooking
@@ -87,7 +88,8 @@ router.put('/:bookingId',
  */
 router.put('/:bookingId/accept',
   authenticateToken,
-  requireRole(['customer']),
+  // Recipient (driver or customer) can accept
+  requireRole(['driver', 'customer']),
   validateObjectId('bookingId'),
   bookingController.acceptBooking
 );
@@ -99,7 +101,7 @@ router.put('/:bookingId/accept',
  */
 router.put('/:bookingId/reject',
   authenticateToken,
-  requireRole(['customer']),
+  requireRole(['driver', 'customer']),
   validateObjectId('bookingId'),
   bookingController.rejectBooking
 );

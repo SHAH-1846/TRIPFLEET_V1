@@ -269,6 +269,12 @@ exports.getAllRequests = async (req, res) => {
     const filter = andConditions.length > 0 ? { ...baseFilter, $and: andConditions } : baseFilter;
 
     // Get requests with pagination
+    // Exclude booked customer requests from driver listings
+    if (userType.name === 'driver') {
+      // booked status: 684da132412825ef8b404715
+      filter.status = { $ne: '684da132412825ef8b404715' };
+    }
+
     const requestsData = await customer_requests
       .find(filter)
       .populate('user', 'name email phone')

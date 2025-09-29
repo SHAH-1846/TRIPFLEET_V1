@@ -296,19 +296,20 @@ const tripSchemas = {
 // Booking Schemas
 const bookingSchemas = {
   createBooking: Joi.object({
-    trip: fields.objectId,
-    vehicle: fields.objectId,
-    price: Joi.number().min(100).max(1000000).required(),
-    pickupDate: Joi.date().min("now").required(),
+    tripId: fields.objectId,
+    customerRequestId: fields.objectId,
+    connectRequestId: Joi.string().pattern(patterns.objectId).required(),
+    price: Joi.number().min(0).required(),
+    pickupDate: Joi.date().iso().min("now").required(),
     notes: Joi.string().trim().max(500).optional(),
   }),
 
   updateBooking: Joi.object({
-    price: Joi.number().min(100).max(1000000).optional(),
-    pickupDate: Joi.date().min("now").optional(),
+    price: Joi.number().min(0).optional(),
+    pickupDate: Joi.date().iso().min("now").optional(),
     notes: Joi.string().trim().max(500).optional(),
     status: Joi.string()
-      .valid("pending", "confirmed", "in_progress", "completed", "cancelled")
+      .valid("pending", "confirmed", "in_progress", "completed", "cancelled", "rejected")
       .optional(),
   }).min(1),
 };
