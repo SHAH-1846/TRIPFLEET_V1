@@ -63,6 +63,14 @@ const bookings = new mongoose.Schema(
     cancelledAt: { type: Date },
     completedAt: { type: Date },
 
+    // Two-step cancellation workflow
+    cancellationPending: { type: Boolean, default: false },
+    cancellationRequestedBy: { type: mongoose.Schema.Types.ObjectId, ref: "users" },
+    cancellationRequestedAt: { type: Date },
+    cancellationReason: { type: String, trim: true },
+    cancellationAcceptedBy: { type: mongoose.Schema.Types.ObjectId, ref: "users" },
+    cancellationAcceptedAt: { type: Date },
+
     isActive: { type: Boolean, default: true },
     bookedAt: { type: Date },
     deletedAt: { type: Date },

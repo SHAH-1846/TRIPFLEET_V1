@@ -111,16 +111,37 @@ exports.createBooking = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
-    // If provided, associate connectRequest
-    let connectRequestId = null;
-    if (value.connectRequestId) {
-      const conn = await connect_requests.findById(value.connectRequestId);
-      if (!conn || !conn.isActive) {
-        const response = badRequest("Invalid connect request");
-        return res.status(response.statusCode).json(response);
-      }
-      connectRequestId = conn._id;
+    // Enforce connectRequest presence and validate initiator/recipient and linkage
+    const conn = await connect_requests.findById(value.connectRequestId);
+    if (!conn || !conn.isActive) {
+      const response = badRequest("Invalid connect request");
+      return res.status(response.statusCode).json(response);
     }
+
+    // Connect request must link the same trip and customer request
+    if (conn.trip.toString() !== value.tripId || conn.customerRequest.toString() !== value.customerRequestId) {
+      const response = forbidden("Connect request does not match the provided trip or customer request");
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Only initiator or recipient of the connect request can create a booking
+    const isParticipant = [conn.initiator.toString(), conn.recipient.toString()].includes(userId);
+    if (!isParticipant) {
+      const response = forbidden("Only the initiator or recipient of the connect request can create a booking");
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Ensure the two participants are exactly the driver and customer we derived
+    const participants = new Set([conn.initiator.toString(), conn.recipient.toString()]);
+    const expected = new Set([driverId.toString(), customerId.toString()]);
+    // Sets must match 1:1
+    const sameParticipants = participants.size === expected.size && [...participants].every(v => expected.has(v));
+    if (!sameParticipants) {
+      const response = forbidden("Connect request participants must be the same driver and customer for this booking");
+      return res.status(response.statusCode).json(response);
+    }
+
+    const connectRequestId = conn._id;
 
     // Optional pickupDate validation
     let pickupDate = value.pickupDate ? new Date(value.pickupDate) : null;
@@ -182,19 +203,15 @@ exports.getAllBookings = async (req, res) => {
 
     // Build filter object
     const filter = { isActive: true };
-    
-    // Filter by user role
+
+    // Role-based visibility: admin sees all; others see where they are initiator or recipient
     const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'customer') {
-      // Customers see bookings for their trips
-      const userTrips = await trips.find({ customer: userId }).select('_id');
-      const tripIds = userTrips.map(trip => trip._id);
-      filter.trip = { $in: tripIds };
-    } else if (userType.name === 'driver') {
-      // Drivers see their own bookings
-      filter.driver = userId;
+    if (userType.name !== 'admin') {
+      filter.$or = [
+        { initiator: userId },
+        { recipient: userId },
+      ];
     }
-    // Admin can see all bookings
     
     if (status) {
       filter.status = status;
@@ -217,8 +234,12 @@ exports.getAllBookings = async (req, res) => {
     // Get bookings with pagination
     const bookingsData = await bookings.find(filter)
       .populate('trip', 'pickupLocation dropLocation goodsType weight budget status')
+      .populate('customerRequest', 'customer')
       .populate('driver', 'name email phone')
-      .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType')
+      .populate('customer', 'name email phone')
+      .populate('initiator', 'name email phone')
+      .populate('recipient', 'name email phone')
+      .populate('connectRequest', 'initiator recipient')
       .sort({ createdAt: -1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -269,25 +290,28 @@ exports.getBookingById = async (req, res) => {
 
     // Get booking with populated data
     const booking = await bookings.findById(bookingId)
-      .populate('trip', 'pickupLocation dropLocation goodsType weight budget status customer')
-      .populate('driver', 'name email phone')
-      .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType truckImages');
+    .populate('trip', 'pickupLocation dropLocation goodsType weight budget status')
+    .populate('customerRequest', 'customer')
+    .populate('driver', 'name email phone')
+    .populate('customer', 'name email phone')
+    .populate('initiator', 'name email phone')
+    .populate('recipient', 'name email phone')
+    .populate('connectRequest', 'initiator recipient');
 
     if (!booking) {
       const response = notFound("Booking not found");
       return res.status(response.statusCode).json(response);
     }
 
-    // Check access permissions
+    // Check access permissions: allow admin, otherwise initiator or recipient only
     const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'customer' && booking.trip.customer.toString() !== userId) {
-      const response = forbidden("Access denied");
-      return res.status(response.statusCode).json(response);
-    }
-    
-    if (userType.name === 'driver' && booking.driver._id.toString() !== userId) {
-      const response = forbidden("Access denied");
-      return res.status(response.statusCode).json(response);
+    if (userType.name !== 'admin') {
+      const initiatorId = booking.initiator && booking.initiator._id ? booking.initiator._id.toString() : booking.initiator.toString();
+      const recipientId = booking.recipient && booking.recipient._id ? booking.recipient._id.toString() : booking.recipient.toString();
+      if (initiatorId !== userId && recipientId !== userId) {
+        const response = forbidden("Access denied");
+        return res.status(response.statusCode).json(response);
+      }
     }
 
     const response = success(
@@ -376,8 +400,12 @@ exports.updateBooking = async (req, res) => {
       { new: true }
     )
     .populate('trip', 'pickupLocation dropLocation goodsType weight budget status')
+    .populate('customerRequest', 'customer')
     .populate('driver', 'name email phone')
-    .populate('vehicle', 'vehicleNumber vehicleType vehicleBodyType');
+    .populate('customer', 'name email phone')
+    .populate('initiator', 'name email phone')
+    .populate('recipient', 'name email phone')
+    .populate('connectRequest', 'initiator recipient');
 
     const response = updated(
       { booking: updatedBooking },
@@ -590,38 +618,97 @@ exports.cancelBooking = async (req, res) => {
 
     // Get booking
     const booking = await bookings.findById(bookingId)
-      .populate('trip', 'customer status');
+      .populate('trip', 'status')
+      .populate('initiator', 'name')
+      .populate('recipient', 'name');
     
     if (!booking) {
       const response = notFound("Booking not found");
       return res.status(response.statusCode).json(response);
     }
 
-    // Check if user can cancel this booking
+    // Check if user is participant (initiator or recipient) unless admin
     const userType = await require("../db/models/user_types").findById(user.user_type);
-    if (userType.name === 'driver' && booking.driver.toString() !== userId) {
-      const response = forbidden("Access denied");
-      return res.status(response.statusCode).json(response);
-    }
-    
-    if (userType.name === 'customer' && booking.customer.toString() !== userId) {
-      const response = forbidden("Access denied");
-      return res.status(response.statusCode).json(response);
+    if (userType.name !== 'admin') {
+      const initiatorId = booking.initiator && booking.initiator._id ? booking.initiator._id.toString() : booking.initiator.toString();
+      const recipientId = booking.recipient && booking.recipient._id ? booking.recipient._id.toString() : booking.recipient.toString();
+      if (initiatorId !== userId && recipientId !== userId) {
+        const response = forbidden("Access denied");
+        return res.status(response.statusCode).json(response);
+      }
     }
 
-    // Check if booking can be cancelled
+    // If already cancelled or completed, block
     if (['completed', 'cancelled'].includes(booking.status)) {
       const response = badRequest("Booking is already completed or cancelled");
       return res.status(response.statusCode).json(response);
     }
 
-    // Cancel booking
+    // Two-step cancellation when confirmed: first participant requests, second confirms
+    if (booking.status === 'confirmed') {
+      // If no pending request, create one by current user
+      if (!booking.cancellationPending) {
+        const updatedBooking = await bookings.findByIdAndUpdate(
+          bookingId,
+          {
+            cancellationPending: true,
+            cancellationRequestedBy: userId,
+            cancellationRequestedAt: new Date(),
+            updatedAt: new Date(),
+          },
+          { new: true }
+        )
+        .populate('trip')
+        .populate('driver', 'name email phone')
+        .populate('customer', 'name email phone');
+
+        const response = updated(
+          { booking: updatedBooking },
+          "Cancellation request created. Awaiting other party's confirmation."
+        );
+        return res.status(response.statusCode).json(response);
+      }
+
+      // If there is a pending request, only the other party can confirm
+      const requestedBy = booking.cancellationRequestedBy?.toString();
+      if (requestedBy === userId) {
+        const response = forbidden("You have already requested cancellation. Await the other party's action.");
+        return res.status(response.statusCode).json(response);
+      }
+
+      // Other party confirms -> cancel
+      const updatedBooking = await bookings.findByIdAndUpdate(
+        bookingId,
+        {
+          status: 'cancelled',
+          cancelledAt: new Date(),
+          cancelledBy: userId,
+          cancellationPending: false,
+          cancellationAcceptedBy: userId,
+          cancellationAcceptedAt: new Date(),
+          updatedAt: new Date(),
+        },
+        { new: true }
+      )
+      .populate('trip')
+      .populate('driver', 'name email phone')
+      .populate('customer', 'name email phone');
+
+      const response = updated(
+        { booking: updatedBooking },
+        "Booking cancelled successfully"
+      );
+      return res.status(response.statusCode).json(response);
+    }
+
+    // If not confirmed (e.g., pending), allow direct cancel by either participant
     const updatedBooking = await bookings.findByIdAndUpdate(
       bookingId,
       { 
         status: 'cancelled',
         cancelledAt: new Date(),
         cancelledBy: userId,
+        cancellationPending: false,
         updatedAt: new Date()
       },
       { new: true }
@@ -629,9 +716,6 @@ exports.cancelBooking = async (req, res) => {
     .populate('trip')
     .populate('driver', 'name email phone')
     .populate('customer', 'name email phone');
-
-    // If booking was confirmed, reset trip status
-    // No direct trip mutation; flow controlled by status APIs
 
     const response = updated(
       { booking: updatedBooking },
