@@ -114,6 +114,8 @@ router.put('/:bookingId/reject',
 router.put('/:bookingId/cancel',
   authenticateToken,
   validateObjectId('bookingId'),
+  sanitizeInput,
+  validateRequest(bookingSchemas.cancelBooking),
   bookingController.cancelBooking
 );
 

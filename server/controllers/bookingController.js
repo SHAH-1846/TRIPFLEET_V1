@@ -244,11 +244,39 @@ exports.getAllBookings = async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit));
 
+    // Add canAcceptOrRejectCancellationRequest field to each booking
+    const enhancedBookingsData = bookingsData.map(booking => {
+      const bookingObj = booking.toObject();
+      
+      // Determine if user can accept/reject cancellation request
+      // User can accept/reject if:
+      // 1. There's a pending cancellation (cancellationPending is true)
+      // 2. User is NOT the one who requested the cancellation
+      // 3. User is either initiator or recipient of the booking
+      let canAcceptOrRejectCancellationRequest = false;
+      
+      if (bookingObj.cancellationPending && bookingObj.cancellationRequestedBy) {
+        const cancellationRequestedById = bookingObj.cancellationRequestedBy.toString();
+        const isUserTheRequester = cancellationRequestedById === userId;
+        const isUserParticipant = [
+          bookingObj.initiator?._id?.toString() || bookingObj.initiator?.toString(),
+          bookingObj.recipient?._id?.toString() || bookingObj.recipient?.toString()
+        ].includes(userId);
+        
+        canAcceptOrRejectCancellationRequest = !isUserTheRequester && isUserParticipant;
+      }
+      
+      return {
+        ...bookingObj,
+        canAcceptOrRejectCancellationRequest
+      };
+    });
+
     // Get total count
     const total = await bookings.countDocuments(filter);
 
     const response = success(
-      bookingsData,
+      enhancedBookingsData,
       "Bookings retrieved successfully",
       200,
       {
@@ -314,8 +342,34 @@ exports.getBookingById = async (req, res) => {
       }
     }
 
+    // Add canAcceptOrRejectCancellationRequest field to booking
+    const bookingObj = booking.toObject();
+    
+    // Determine if user can accept/reject cancellation request
+    // User can accept/reject if:
+    // 1. There's a pending cancellation (cancellationPending is true)
+    // 2. User is NOT the one who requested the cancellation
+    // 3. User is either initiator or recipient of the booking
+    let canAcceptOrRejectCancellationRequest = false;
+    
+    if (bookingObj.cancellationPending && bookingObj.cancellationRequestedBy) {
+      const cancellationRequestedById = bookingObj.cancellationRequestedBy.toString();
+      const isUserTheRequester = cancellationRequestedById === userId;
+      const isUserParticipant = [
+        bookingObj.initiator?._id?.toString() || bookingObj.initiator?.toString(),
+        bookingObj.recipient?._id?.toString() || bookingObj.recipient?.toString()
+      ].includes(userId);
+      
+      canAcceptOrRejectCancellationRequest = !isUserTheRequester && isUserParticipant;
+    }
+    
+    const enhancedBooking = {
+      ...bookingObj,
+      canAcceptOrRejectCancellationRequest
+    };
+
     const response = success(
-      { booking },
+      { booking: enhancedBooking },
       "Booking retrieved successfully"
     );
 
@@ -609,6 +663,22 @@ exports.cancelBooking = async (req, res) => {
     const { bookingId } = req.params;
     const userId = req.user.user_id;
 
+    // Validate request data
+    const { error, value } = bookingSchemas.cancelBooking.validate(req.body, { 
+      abortEarly: false, 
+      stripUnknown: true 
+    });
+
+    if (error) {
+      const errors = error.details.map(detail => ({
+        field: detail.path.join('.'),
+        message: detail.message
+      }));
+      
+      const response = badRequest("Validation failed", errors);
+      return res.status(response.statusCode).json(response);
+    }
+
     // Check if user exists and is active
     const user = await users.findById(userId);
     if (!user || !user.isActive) {
@@ -654,6 +724,7 @@ exports.cancelBooking = async (req, res) => {
             cancellationPending: true,
             cancellationRequestedBy: userId,
             cancellationRequestedAt: new Date(),
+            cancellationReason: value.cancellationReason,
             updatedAt: new Date(),
           },
           { new: true }
@@ -686,6 +757,7 @@ exports.cancelBooking = async (req, res) => {
           cancellationPending: false,
           cancellationAcceptedBy: userId,
           cancellationAcceptedAt: new Date(),
+          // Keep existing cancellationReason from the initial request
           updatedAt: new Date(),
         },
         { new: true }
@@ -708,6 +780,7 @@ exports.cancelBooking = async (req, res) => {
         status: 'cancelled',
         cancelledAt: new Date(),
         cancelledBy: userId,
+        cancellationReason: value.cancellationReason,
         cancellationPending: false,
         updatedAt: new Date()
       },

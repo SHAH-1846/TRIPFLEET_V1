@@ -312,6 +312,15 @@ const bookingSchemas = {
       .valid("pending", "confirmed", "in_progress", "completed", "cancelled", "rejected")
       .optional(),
   }).min(1),
+
+  cancelBooking: Joi.object({
+    cancellationReason: Joi.string().trim().min(3).max(500).required().messages({
+      "string.empty": "Cancellation reason is required",
+      "string.min": "Cancellation reason must be at least 3 characters long",
+      "string.max": "Cancellation reason cannot exceed 500 characters",
+      "any.required": "Cancellation reason is required"
+    }),
+  }),
 };
 
 // Customer Request Schemas (aligned with customer_requests model)
