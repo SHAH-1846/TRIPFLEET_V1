@@ -4,6 +4,7 @@
  */
 
 const { Types } = require("mongoose");
+const mongoose = require("mongoose");
 
 // Models
 const customer_requests = require("../db/models/customer_requests");
@@ -177,7 +178,17 @@ exports.getAllRequests = async (req, res) => {
     if (userType.name === 'customer') {
       baseFilter.user = userId;
     } else if (userType.name === 'driver') {
-      baseFilter.assignedTo = userId;
+      // Drivers can see all active requests
+      // If the business rule is to hide already booked, keep the exclusion below
+      // booked status: 684da132412825ef8b404715
+      const excludeStatuses = [
+        '684da132412825ef8b404715',
+        '684da13e412825ef8b404716',
+        '684da149412825ef8b404717'
+      ].map((id) => new mongoose.Types.ObjectId(id)); // use `new` per item
+
+      baseFilter.status = { $nin: excludeStatuses };
+      console.log("status : ", baseFilter);
     }
     // Admin can see all requests
 
@@ -268,11 +279,20 @@ exports.getAllRequests = async (req, res) => {
 
     const filter = andConditions.length > 0 ? { ...baseFilter, $and: andConditions } : baseFilter;
 
+    
+
     // Get requests with pagination
     // Exclude booked customer requests from driver listings
     if (userType.name === 'driver') {
       // booked status: 684da132412825ef8b404715
-      filter.status = { $ne: '684da132412825ef8b404715' };
+      // filter.status = { $ne: '684da132412825ef8b404715' };
+      filter.status = {
+        $nin: [
+          '684da132412825ef8b404715',
+          '684da13e412825ef8b404716',
+          '684da149412825ef8b404717'
+        ]
+      };
     }
 
     const requestsData = await customer_requests
@@ -311,6 +331,87 @@ exports.getAllRequests = async (req, res) => {
     return res.status(response.statusCode).json(response);
   }
 };
+
+// controllers/customerRequestController.js
+exports.getMyCustomerRequests = async (req, res) => {
+  try {
+    const userId = req.user.user_id;
+    const {
+      page = 1,
+      limit = 10,
+      status,
+      q,
+      dateFrom,
+      dateTo
+    } = req.query;
+    const skip = (page - 1) * limit;
+
+    // Validate user
+    const user = await users.findById(userId);
+    if (!user || !user.isActive) {
+      const response = unauthorized("User not found or inactive");
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Only requests created by this user
+    const filter = { isActive: true, user: userId };
+
+    if (status) filter.status = status;
+
+    // Search by title/description/addresses
+    if (q && typeof q === 'string' && q.trim().length > 0) {
+      const regex = { $regex: q.trim(), $options: 'i' };
+      filter.$or = [
+        { title: regex },
+        { description: regex },
+        { 'pickupLocation.address': regex },
+        { 'dropoffLocation.address': regex },
+        { 'packageDetails.description': regex },
+      ];
+    }
+
+    // Date range on pickupTime
+    if (dateFrom || dateTo) {
+      filter.pickupTime = {};
+      if (dateFrom) filter.pickupTime.$gte = new Date(dateFrom);
+      if (dateTo) filter.pickupTime.$lte = new Date(dateTo);
+    }
+
+    const requestsData = await customer_requests
+      .find(filter)
+      .populate('status', 'name description')
+      .populate('images', 'url filename')
+      .populate('documents', 'url filename')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await customer_requests.countDocuments(filter);
+
+    const response = success(
+      requestsData,
+      "My customer requests retrieved successfully",
+      200,
+      {
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          totalPages: Math.ceil(total / limit),
+          hasNext: page < Math.ceil(total / limit),
+          hasPrev: page > 1,
+        },
+      }
+    );
+
+    return res.status(response.statusCode).json(response);
+  } catch (error) {
+    console.error("Get my customer requests error:", error);
+    const response = serverError("Failed to retrieve my customer requests");
+    return res.status(response.statusCode).json(response);
+  }
+};
+
 
 /**
  * Get specific customer request by ID

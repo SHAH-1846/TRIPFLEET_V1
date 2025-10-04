@@ -46,6 +46,14 @@ router.get('/',
   customerRequestController.getAllRequests
 );
 
+// routes/customerRequests.js
+router.get('/my',
+  authenticateToken,
+  pagination,
+  customerRequestController.getMyCustomerRequests
+);
+
+
 /**
  * @route GET /api/v1/customer-requests/stats
  * @desc Get customer request statistics
