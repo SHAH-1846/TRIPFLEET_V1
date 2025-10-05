@@ -10,10 +10,10 @@ const router = express.Router();
 const connectRequestController = require('../controllers/connectRequestController');
 
 // Middleware
-const { 
-  authenticateToken, 
-  requireRole, 
-  validateRequest, 
+const {
+  authenticateToken,
+  requireRole,
+  validateRequest,
   sanitizeInput,
   validateObjectId,
   pagination
@@ -69,16 +69,24 @@ router.put('/:requestId/respond',
   connectRequestController.respondToRequest
 );
 
+// routes/connectRequests.js
+router.put(
+  '/:requestId/cancel',
+  authenticateToken,
+  sanitizeInput,
+  connectRequestController.cancelRequest
+);
+
 /**
  * @route PUT /api/v1/connect-requests/:requestId/accept
  * @desc Accept a connect request (for mutual acceptance)
  * @access Private (initiator only)
  */
-router.put('/:requestId/accept',
-  authenticateToken,
-  validateObjectId('requestId'),
-  connectRequestController.acceptRequest
-);
+// router.put('/:requestId/accept',
+//   authenticateToken,
+//   validateObjectId('requestId'),
+//   connectRequestController.acceptRequest
+// );
 
 /**
  * @route DELETE /api/v1/connect-requests/:requestId

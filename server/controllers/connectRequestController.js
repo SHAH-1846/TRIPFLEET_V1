@@ -3,6 +3,7 @@
  * Handles connect requests between drivers and customers via leads or trips
  */
 
+const mongoose = require("mongoose");
 const { Types } = require("mongoose");
 
 // Models
@@ -147,7 +148,7 @@ exports.sendRequest = async (req, res) => {
 
     const distanceKm = customerRequest.distance?.value / 1000; // Convert meters to km
     tokensRequired = await tokenController.calculateLeadTokens(distanceKm);
-    
+
     // Check if initiator has sufficient tokens (only for drivers)
     if (isInitiatorDriver) {
       const TokenWallet = require("../db/models/token_wallets");
@@ -170,6 +171,19 @@ exports.sendRequest = async (req, res) => {
     };
 
     const newConnectRequest = await connect_requests.create(connectRequestData);
+
+
+    // CHANGED: Atomically update connect counters on the parent customer_request (pending create)
+    await customer_requests.updateOne( // CHANGED
+      { _id: value.customerRequestId }, // CHANGED
+      { // CHANGED
+        $inc: { // CHANGED
+          "connectStats.total": 1, // CHANGED
+          "connectStats.pending": 1 // CHANGED
+        }, // CHANGED
+        $set: { "connectStats.updatedAt": new Date() } // CHANGED
+      } // CHANGED
+    ); // CHANGED
 
     // Populate request data for response
     const populatedRequest = await connect_requests
@@ -344,6 +358,38 @@ exports.respondToRequest = async (req, res) => {
       { new: true }
     );
 
+
+    // CHANGED: Update connectStats on the parent customer_request based on final status transition
+    const crId = connectRequest.customerRequest; // CHANGED
+    const now = new Date(); // CHANGED
+    if (value.action === "accept") { // CHANGED
+      if (updatedRequest.status === "accepted") { // CHANGED
+        await customer_requests.updateOne( // CHANGED
+          { _id: crId }, // CHANGED
+          { // CHANGED
+            $inc: { "connectStats.pending": -1, "connectStats.accepted": 1 }, // CHANGED
+            $set: { "connectStats.updatedAt": now } // CHANGED
+          } // CHANGED
+        ); // CHANGED
+      } else if (updatedRequest.status === "hold") { // CHANGED
+        await customer_requests.updateOne( // CHANGED
+          { _id: crId }, // CHANGED
+          { // CHANGED
+            $inc: { "connectStats.pending": -1, "connectStats.hold": 1 }, // CHANGED
+            $set: { "connectStats.updatedAt": now } // CHANGED
+          } // CHANGED
+        ); // CHANGED
+      } // CHANGED
+    } else if (value.action === "reject") { // CHANGED
+      await customer_requests.updateOne( // CHANGED
+        { _id: crId }, // CHANGED
+        { // CHANGED
+          $inc: { "connectStats.pending": -1, "connectStats.rejected": 1 }, // CHANGED
+          $set: { "connectStats.updatedAt": now } // CHANGED
+        } // CHANGED
+      ); // CHANGED
+    } // CHANGED
+
     // Populate request data for response
     const populatedRequest = await connect_requests
       .findById(updatedRequest._id)
@@ -365,83 +411,217 @@ exports.respondToRequest = async (req, res) => {
   }
 };
 
-/**
- * Accept a connect request (for mutual acceptance)
- * @route PUT /api/v1/connect-requests/:requestId/accept
- */
-exports.acceptRequest = async (req, res) => {
+// controllers/connectRequestController.js
+// exports.cancelRequest = async (req, res) => {
+//   // CHANGED: new API to cancel a pending connectRequest by initiator
+//   const session = await mongoose.startSession(); // CHANGED
+//   try {
+//     const { requestId } = req.params; // CHANGED
+//     const userId = req.user.user_id;  // CHANGED
+
+//     await session.withTransaction(async () => { // CHANGED
+//       // Load request
+//       const cr = await connect_requests.findById(requestId).session(session); // CHANGED
+//       if (!cr || !cr.isActive) {
+//         const response = notFound("Connect request not found or already inactive");
+//         throw response; // CHANGED
+//       }
+
+//       // Must be initiator
+//       if (cr.initiator.toString() !== userId) {
+//         const response = forbidden("Only the initiator can cancel this request");
+//         throw response; // CHANGED
+//       }
+
+//       // Must be pending to cancel
+//       if (cr.status !== "pending") {
+//         const response = badRequest("Only pending requests can be canceled");
+//         throw response; // CHANGED
+//       }
+
+//       // Soft delete / cancel the connect request
+//       await connect_requests.updateOne( // CHANGED
+//         { _id: cr._id },
+//         {
+//           $set: {
+//             status : "cancelled",
+//             isActive: false,
+//             deletedBy: userId,
+//             deletedAt: new Date()
+//           }
+//         },
+//         { session }
+//       );
+
+//       // Update parent counters: pending -1 and total -1
+//       await customer_requests.updateOne( // CHANGED
+//         { _id: cr.customerRequest },
+//         {
+//           $inc: {
+//             "connectStats.pending": -1,
+//             "connectStats.total": -1
+//           },
+//           $set: { "connectStats.updatedAt": new Date() }
+//         },
+//         { session }
+//       );
+//     });
+
+//     session.endSession(); // CHANGED
+
+//     const response = updated(
+//       { canceled: true },
+//       "Connect request canceled successfully"
+//     ); // CHANGED
+//     return res.status(response.statusCode).json(response); // CHANGED
+//   } catch (err) {
+//     session.endSession(); // CHANGED
+
+//     // If thrown one of our response objects above
+//     if (err?.statusCode) {
+//       return res.status(err.statusCode).json(err); // CHANGED
+//     }
+
+//     console.error("Cancel connect request error:", err);
+//     const response = serverError("Failed to cancel connect request"); // CHANGED
+//     return res.status(response.statusCode).json(response); // CHANGED
+//   }
+// };
+
+// controllers/connectRequestController.js
+exports.cancelRequest = async (req, res) => {
   try {
     const { requestId } = req.params;
     const userId = req.user.user_id;
 
-    // Check if user exists and is active
-    const user = await users.findById(userId);
-    if (!user || !user.isActive) {
-      const response = unauthorized("User not found or inactive");
+    // 1) Load and validate request
+    const cr = await connect_requests.findById(requestId);
+    if (!cr || !cr.isActive) {
+      const response = notFound("Connect request not found or already inactive");
+      return res.status(response.statusCode).json(response);
+    }
+    if (cr.initiator.toString() !== userId) {
+      const response = forbidden("Only the initiator can cancel this request");
+      return res.status(response.statusCode).json(response);
+    }
+    if (cr.status !== "pending") {
+      const response = badRequest("Only pending requests can be canceled");
       return res.status(response.statusCode).json(response);
     }
 
-    // Get connect request
-    const connectRequest = await connect_requests.findById(requestId);
-    if (!connectRequest || !connectRequest.isActive) {
-      const response = notFound("Connect request not found");
-      return res.status(response.statusCode).json(response);
-    }
-
-    // Check if user is the initiator
-    if (connectRequest.initiator.toString() !== userId) {
-      const response = forbidden("You can only accept requests you initiated");
-      return res.status(response.statusCode).json(response);
-    }
-
-    // Check if request is accepted by recipient
-    if (!connectRequest.recipientAccepted) {
-      const response = badRequest("Recipient has not accepted this request yet");
-      return res.status(response.statusCode).json(response);
-    }
-
-    // Check if already accepted by initiator
-    if (connectRequest.initiatorAccepted) {
-      const response = badRequest("Request already accepted by initiator");
-      return res.status(response.statusCode).json(response);
-    }
-
-    // Update request
-    const updateData = {
-      initiatorAccepted: true,
-      initiatorAcceptedAt: new Date(),
-      contactDetailsShared: true,
-      contactDetailsSharedAt: new Date(),
-      lastUpdatedBy: userId,
-      updatedAt: new Date(),
-    };
-
-    const updatedRequest = await connect_requests.findByIdAndUpdate(
-      requestId,
-      updateData,
-      { new: true }
+    // 2) Soft delete the connect request
+    await connect_requests.updateOne(
+      { _id: cr._id, isActive: true, status: "pending" }, // guard to prevent races
+      {
+        $set: {
+          status: "cancelled",
+          isActive: false,
+          deletedBy: userId,
+          deletedAt: new Date()
+        }
+      }
     );
 
-    // Populate request data for response
-    const populatedRequest = await connect_requests
-      .findById(updatedRequest._id)
-      .populate("initiator", "name email phone")
-      .populate("recipient", "name email phone")
-      .populate("customerRequest", "title description")
-      .populate("trip", "title description");
-
-    const response = updated(
-      { connectRequest: populatedRequest },
-      "Connect request accepted successfully"
+    // 3) Decrement counters on parent request
+    await customer_requests.updateOne(
+      { _id: cr.customerRequest },
+      {
+        $inc: {
+          "connectStats.pending": -1,
+          "connectStats.total": -1
+        },
+        $set: { "connectStats.updatedAt": new Date() }
+      }
     );
 
+    const response = updated({ canceled: true }, "Connect request canceled successfully");
     return res.status(response.statusCode).json(response);
-  } catch (error) {
-    console.error("Accept connect request error:", error);
-    const response = serverError("Failed to accept connect request");
+  } catch (err) {
+    console.error("Cancel connect request error:", err);
+    const response = serverError("Failed to cancel connect request");
     return res.status(response.statusCode).json(response);
   }
 };
+
+
+
+/**
+ * Accept a connect request (for mutual acceptance)
+ * @route PUT /api/v1/connect-requests/:requestId/accept
+ */
+// exports.acceptRequest = async (req, res) => {
+//   try {
+//     const { requestId } = req.params;
+//     const userId = req.user.user_id;
+
+//     // Check if user exists and is active
+//     const user = await users.findById(userId);
+//     if (!user || !user.isActive) {
+//       const response = unauthorized("User not found or inactive");
+//       return res.status(response.statusCode).json(response);
+//     }
+
+//     // Get connect request
+//     const connectRequest = await connect_requests.findById(requestId);
+//     if (!connectRequest || !connectRequest.isActive) {
+//       const response = notFound("Connect request not found");
+//       return res.status(response.statusCode).json(response);
+//     }
+
+//     // Check if user is the initiator
+//     if (connectRequest.initiator.toString() !== userId) {
+//       const response = forbidden("You can only accept requests you initiated");
+//       return res.status(response.statusCode).json(response);
+//     }
+
+//     // Check if request is accepted by recipient
+//     if (!connectRequest.recipientAccepted) {
+//       const response = badRequest("Recipient has not accepted this request yet");
+//       return res.status(response.statusCode).json(response);
+//     }
+
+//     // Check if already accepted by initiator
+//     if (connectRequest.initiatorAccepted) {
+//       const response = badRequest("Request already accepted by initiator");
+//       return res.status(response.statusCode).json(response);
+//     }
+
+//     // Update request
+//     const updateData = {
+//       initiatorAccepted: true,
+//       initiatorAcceptedAt: new Date(),
+//       contactDetailsShared: true,
+//       contactDetailsSharedAt: new Date(),
+//       lastUpdatedBy: userId,
+//       updatedAt: new Date(),
+//     };
+
+//     const updatedRequest = await connect_requests.findByIdAndUpdate(
+//       requestId,
+//       updateData,
+//       { new: true }
+//     );
+
+//     // Populate request data for response
+//     const populatedRequest = await connect_requests
+//       .findById(updatedRequest._id)
+//       .populate("initiator", "name email phone")
+//       .populate("recipient", "name email phone")
+//       .populate("customerRequest", "title description")
+//       .populate("trip", "title description");
+
+//     const response = updated(
+//       { connectRequest: populatedRequest },
+//       "Connect request accepted successfully"
+//     );
+
+//     return res.status(response.statusCode).json(response);
+//   } catch (error) {
+//     console.error("Accept connect request error:", error);
+//     const response = serverError("Failed to accept connect request");
+//     return res.status(response.statusCode).json(response);
+//   }
+// };
 
 /**
  * Get connect requests for the current user
@@ -462,7 +642,7 @@ exports.getConnectRequests = async (req, res) => {
 
     // Build filter
     const filter = { isActive: true };
-    
+
     if (type === "sent") {
       filter.initiator = userId;
     } else if (type === "received") {
@@ -557,7 +737,7 @@ exports.getConnectRequestById = async (req, res) => {
     if (connectRequest.contactDetailsShared) {
       const isInitiator = connectRequest.initiator._id.toString() === userId;
       const otherParty = isInitiator ? connectRequest.recipient : connectRequest.initiator;
-      
+
       contactDetails = {
         name: otherParty.name,
         email: otherParty.email,
@@ -608,8 +788,8 @@ exports.deleteConnectRequest = async (req, res) => {
     }
 
     // Check if request can be deleted
-    if (connectRequest.status === "accepted") {
-      const response = badRequest("Cannot delete accepted connect request");
+    if (connectRequest.status !== "cancelled") {
+      const response = badRequest("Cannot delete connect request");
       return res.status(response.statusCode).json(response);
     }
 
@@ -774,9 +954,9 @@ exports.getConnectRequestVerification = async (req, res) => {
         },
         pickup: pickupCompatibility,
         dropoff: dropoffCompatibility,
-        overall: distanceCompatibility && 
-                (pickupCompatibility.distance === null || pickupCompatibility.distance <= 5000) &&
-                (dropoffCompatibility.distance === null || dropoffCompatibility.distance <= 5000),
+        overall: distanceCompatibility &&
+          (pickupCompatibility.distance === null || pickupCompatibility.distance <= 5000) &&
+          (dropoffCompatibility.distance === null || dropoffCompatibility.distance <= 5000),
       },
       tokenInfo: {
         tokensRequired: connectRequest.tokenDeduction.tokensRequired,
@@ -890,17 +1070,17 @@ exports.getContactDetails = async (req, res) => {
 
     const contact = isInitiator
       ? {
-          name: connectRequest.recipient.name,
-          email: connectRequest.recipient.email,
-          phone: connectRequest.recipient.phone,
-          whatsappNumber: connectRequest.recipient.whatsappNumber,
-        }
+        name: connectRequest.recipient.name,
+        email: connectRequest.recipient.email,
+        phone: connectRequest.recipient.phone,
+        whatsappNumber: connectRequest.recipient.whatsappNumber,
+      }
       : {
-          name: connectRequest.initiator.name,
-          email: connectRequest.initiator.email,
-          phone: connectRequest.initiator.phone,
-          whatsappNumber: connectRequest.initiator.whatsappNumber,
-        };
+        name: connectRequest.initiator.name,
+        email: connectRequest.initiator.email,
+        phone: connectRequest.initiator.phone,
+        whatsappNumber: connectRequest.initiator.whatsappNumber,
+      };
 
     const response = success({ show: true, contact }, "Contact details available");
     return res.status(response.statusCode).json(response);
@@ -925,8 +1105,8 @@ function calculateDistance(coord1, coord2) {
   const dLat = (lat2 - lat1) * Math.PI / 180;
   const dLng = (lng2 - lng1) * Math.PI / 180;
   const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-            Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+    Math.sin(dLng / 2) * Math.sin(dLng / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   const distance = R * c;
 

@@ -33,7 +33,7 @@ const connect_requests = new mongoose.Schema(
     // Status of the connect request
     status: {
       type: String,
-      enum: ["pending", "accepted", "rejected", "expired", "hold"],
+      enum: ["pending", "accepted", "rejected", "cancelled", "expired", "hold"],
       default: "pending",
     },
 

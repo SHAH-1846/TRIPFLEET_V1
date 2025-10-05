@@ -67,6 +67,15 @@ const customer_requests = new mongoose.Schema(
       type: Boolean,
       default: true,
     },
+    // NEW: Precomputed counters for connect requests
+    connectStats: {
+      total: { type: Number, default: 0 },
+      pending: { type: Number, default: 0 },
+      accepted: { type: Number, default: 0 },
+      rejected: { type: Number, default: 0 },
+      hold: { type: Number, default: 0 },
+      updatedAt: { type: Date },
+    },
     // matchedTrip: {
     //   type: mongoose.Schema.Types.ObjectId,
     //   ref: "trips",
@@ -84,5 +93,11 @@ customer_requests.index({ "pickupLocation.coordinates": "2dsphere" });
 customer_requests.index({ "dropoffLocation.coordinates": "2dsphere" });
 // Text index to enable search on title and description
 customer_requests.index({ title: "text", description: "text" });
+
+// NEW: Indexes to accelerate filters/sorts by connect counts
+customer_requests.index({ "connectStats.pending": -1, isActive: 1 });
+customer_requests.index({ "connectStats.accepted": -1, isActive: 1 });
+customer_requests.index({ "connectStats.rejected": -1, isActive: 1 });
+customer_requests.index({ "connectStats.total": -1, isActive: 1 });
 
 module.exports = mongoose.model("customer_requests", customer_requests);
