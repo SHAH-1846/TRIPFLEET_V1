@@ -159,7 +159,13 @@ exports.getAllRequests = async (req, res) => {
       destination,
       searchRadius,
       radius,
+      connectStatus,           // "pending" | "accepted" | "rejected" | "hold" | "total"  (if added)
+      connectMin,              // number
+      connectMax,              // number
+      connectSort,             // "pending" | "accepted" | "rejected" | "total"
+      connectOrder,            // "asc" | "desc"
     } = req.query;
+    console.log("connectMax : ", connectMax);
     const skip = (page - 1) * limit;
 
     // Check if user exists and is active
@@ -188,7 +194,6 @@ exports.getAllRequests = async (req, res) => {
       ].map((id) => new mongoose.Types.ObjectId(id)); // use `new` per item
 
       baseFilter.status = { $nin: excludeStatuses };
-      console.log("status : ", baseFilter);
     }
     // Admin can see all requests
 
@@ -196,6 +201,48 @@ exports.getAllRequests = async (req, res) => {
     if (category) baseFilter.category = category;
     if (priority) baseFilter.priority = priority;
     if (assignedTo) baseFilter.assignedTo = assignedTo;
+
+    // Parse numeric query params explicitly
+    const parseNum = (v) => {
+      if (v === undefined || v === null) return undefined;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : undefined;
+    };
+
+    const cMin = parseNum(connectMin);
+    const cMax = parseNum(connectMax);
+
+    // Connect counters filtering (uses precomputed connectStats.*)
+    if (connectStatus) {
+      const allowed = new Set(['pending', 'accepted', 'rejected', 'total', 'hold']);
+      const key = String(connectStatus).toLowerCase();
+      if (allowed.has(key)) {
+        const path = `connectStats.${key === 'total' ? 'total' : key}`;
+        const range = {};
+        if (cMin !== undefined) range.$gte = cMin;
+        if (cMax !== undefined) range.$lte = cMax;
+
+        // Only default to > 0 if neither min nor max was provided
+        if (!Object.prototype.hasOwnProperty.call(range, '$gte') &&
+          !Object.prototype.hasOwnProperty.call(range, '$lte')) {
+          range.$gt = 0;
+        }
+
+        andConditions.push({ [path]: range });
+      }
+    }
+
+    // Dynamic sorting by counters, then createdAt desc fallback
+    const sort = { createdAt: -1 };
+    if (connectSort) {
+      const key = String(connectSort).toLowerCase();
+      const allowedSort = new Set(['pending', 'accepted', 'rejected', 'total']);
+      if (allowedSort.has(key)) {
+        const dir = String(connectOrder).toLowerCase() === 'asc' ? 1 : -1;
+        // Prepend counter sort with chosen direction; keep createdAt as secondary
+        sort[`connectStats.${key === 'total' ? 'total' : key}`] = dir;
+      }
+    }
 
     // Search across addresses and description
     if (q && typeof q === 'string' && q.trim().length > 0) {
@@ -279,7 +326,6 @@ exports.getAllRequests = async (req, res) => {
 
     const filter = andConditions.length > 0 ? { ...baseFilter, $and: andConditions } : baseFilter;
 
-    
 
     // Get requests with pagination
     // Exclude booked customer requests from driver listings
@@ -301,7 +347,7 @@ exports.getAllRequests = async (req, res) => {
       .populate('images', 'url filename')
       .populate('documents', 'url filename')
       .populate('status', 'name description')
-      .sort({ createdAt: -1 })
+      .sort(sort)
       .skip(skip)
       .limit(parseInt(limit));
 
