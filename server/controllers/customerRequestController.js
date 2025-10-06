@@ -8,6 +8,7 @@ const mongoose = require("mongoose");
 
 // Models
 const customer_requests = require("../db/models/customer_requests");
+const connect_requests = require("../db/models/connect_requests");
 const users = require("../db/models/users");
 const images = require("../db/models/images");
 const customerRequestStatus = require("../db/models/customer_request_status");
@@ -801,6 +802,12 @@ exports.deleteRequest = async (req, res) => {
 
     // Check if user can delete this request
     const userType = await require("../db/models/user_types").findById(user.user_type);
+
+    if (userType.name === 'driver') {
+      const response = forbidden("Access denied");
+      return res.status(response.statusCode).json(response);
+    }
+
     if (userType.name === 'customer' && request.user.toString() !== userId) {
       const response = forbidden("Access denied");
       return res.status(response.statusCode).json(response);
@@ -811,6 +818,19 @@ exports.deleteRequest = async (req, res) => {
       const response = badRequest("Cannot delete request that is in progress or resolved");
       return res.status(response.statusCode).json(response);
     }
+
+    // Disallow delete if there is any active connect request not in allowed terminal statuses
+    const hasBlockingConnect = await connect_requests.findOne({
+      customerRequest: requestId,
+      isActive: true,
+      status: { $nin: ["rejected", "cancelled", "expired"] }
+    }).select({ _id: 1 }).lean();
+
+    if (hasBlockingConnect) {
+      const response = badRequest("Cannot delete: active connect requests are pending/accepted/hold for this lead");
+      return res.status(response.statusCode).json(response);
+    }
+
 
     // Soft delete request
     await customer_requests.findByIdAndUpdate(requestId, {

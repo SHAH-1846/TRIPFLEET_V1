@@ -9,6 +9,7 @@ const { Types } = require("mongoose");
 const trips = require("../db/models/trips");
 const users = require("../db/models/users");
 const vehicles = require("../db/models/vehicles");
+const connect_requests = require("../db/models/connect_requests");
 const bookings = require("../db/models/bookings");
 require("../db/models/goods_accepted");
 require("../db/models/trip_status");
@@ -275,7 +276,7 @@ exports.createTrip = async (req, res) => {
       if (!wallet) {
         wallet = await TokenWallet.create({ driver: userId, balance: 0 });
       }
-      
+
       if (wallet.balance < tokensRequired) {
         const response = badRequest(`Insufficient tokens. Required: ${tokensRequired}, Available: ${wallet.balance}`);
         return res.status(response.statusCode).json(response);
@@ -371,7 +372,7 @@ exports.createTrip = async (req, res) => {
       .populate('status', 'name description');
 
     const response = created(
-      { 
+      {
         trip: populatedTrip,
         tokensDeducted: tokensRequired,
         tripDistance: tripDistance
@@ -576,7 +577,7 @@ exports.getAllTrips = async (req, res) => {
 
     // Parse coordinates from query parameters with robust validation
     let pickupLat, pickupLng, dropoffLat, dropoffLng, currentLat, currentLng;
-    
+
     // Radius (meters): configurable via query params `searchRadius` or `radius`, default 5000
     let searchRadius = 5000;
     const radiusParam = typeof req.query.searchRadius !== 'undefined' ? req.query.searchRadius : req.query.radius;
@@ -600,7 +601,7 @@ exports.getAllTrips = async (req, res) => {
     const parseCoordinates = (coordInput, paramName) => {
       try {
         let lng, lat;
-        
+
         if (Array.isArray(coordInput)) {
           if (coordInput.length !== 2) {
             throw new Error(`Invalid ${paramName}: expected array with 2 elements [lng, lat]`);
@@ -697,16 +698,16 @@ exports.getAllTrips = async (req, res) => {
 
     if (pickupLat && pickupLng) {
       const pickupOrFilters = buildGeoOrFilters(pickupLng, pickupLat, searchRadius);
-      
+
       if (dropoffLat && dropoffLng) {
         // Both pickup and dropoff provided
-        console.log("Finding trips near both pickup and dropoff points:", { 
-          pickup: { pickupLng, pickupLat }, 
-          dropoff: { dropoffLng, dropoffLat } 
+        console.log("Finding trips near both pickup and dropoff points:", {
+          pickup: { pickupLng, pickupLat },
+          dropoff: { dropoffLng, dropoffLat }
         });
-        
+
         const dropoffOrFilters = buildGeoOrFilters(dropoffLng, dropoffLat, searchRadius);
-        
+
         // Check if pickupDropoffBoth is true (require proximity to BOTH points)
         if (pickupDropoffBoth === 'true') {
           console.log("Requiring proximity to BOTH pickup and dropoff points");
@@ -717,29 +718,29 @@ exports.getAllTrips = async (req, res) => {
               { $or: dropoffOrFilters }
             ]
           };
-          
+
           tripsData = await buildQueryWithPopulation(finalFilter);
           total = await getTotalCount(finalFilter);
         } else {
           // Default behavior: require proximity to pickup, optional proximity to dropoff
           console.log("Requiring proximity to pickup, optional proximity to dropoff");
-          
+
           // First get trips near pickup
           const pickupFilter = {
             $and: [filter, { $or: pickupOrFilters }]
           };
-          
+
           const pickupTrips = await buildQueryWithPopulation(pickupFilter);
           console.log(`Found ${pickupTrips.length} trips near pickup point`);
-          
+
           // Then filter those that are also near dropoff
           const dropoffFilter = {
             $and: [filter, { $or: pickupOrFilters }, { $or: dropoffOrFilters }]
           };
-          
+
           tripsData = await buildQueryWithPopulation(dropoffFilter);
           total = await getTotalCount(dropoffFilter);
-          
+
           console.log(`After dropoff filtering: ${tripsData.length} trips`);
         }
       } else {
@@ -748,7 +749,7 @@ exports.getAllTrips = async (req, res) => {
         const finalFilter = {
           $and: [filter, { $or: pickupOrFilters }]
         };
-        
+
         tripsData = await buildQueryWithPopulation(finalFilter);
         total = await getTotalCount(finalFilter);
       }
@@ -759,7 +760,7 @@ exports.getAllTrips = async (req, res) => {
       const finalFilter = {
         $and: [filter, { $or: dropoffOrFilters }]
       };
-      
+
       tripsData = await buildQueryWithPopulation(finalFilter);
       total = await getTotalCount(finalFilter);
     } else if (currentLat && currentLng) {
@@ -769,7 +770,7 @@ exports.getAllTrips = async (req, res) => {
       const finalFilter = {
         $and: [filter, { $or: currentOrFilters }]
       };
-      
+
       tripsData = await buildQueryWithPopulation(finalFilter);
       total = await getTotalCount(finalFilter);
     } else {
@@ -888,7 +889,7 @@ exports.updateTrip = async (req, res) => {
         const response = badRequest("Invalid trip start location coordinates. Expected [lng, lat] array");
         return res.status(response.statusCode).json(response);
       }
-      
+
       // Validate coordinate values
       const [lng, lat] = updateData.tripStartLocation.coordinates;
       if (isNaN(lng) || isNaN(lat)) {
@@ -912,7 +913,7 @@ exports.updateTrip = async (req, res) => {
         const response = badRequest("Invalid trip destination coordinates. Expected [lng, lat] array");
         return res.status(response.statusCode).json(response);
       }
-      
+
       // Validate coordinate values
       const [lng, lat] = updateData.tripDestination.coordinates;
       if (isNaN(lng) || isNaN(lat)) {
@@ -938,7 +939,7 @@ exports.updateTrip = async (req, res) => {
           const response = badRequest("Invalid via route. Each via route must have address and coordinates as [lng, lat] array");
           return res.status(response.statusCode).json(response);
         }
-        
+
         const [lng, lat] = via.coordinates;
         if (isNaN(lng) || isNaN(lat) || lng < -180 || lng > 180 || lat < -90 || lat > 90) {
           const response = badRequest("Invalid via route coordinates. Longitude must be between -180 and 180, latitude between -90 and 90");
@@ -1044,19 +1045,19 @@ exports.updateTrip = async (req, res) => {
 
     // Calculate token changes if distance is being updated
     let tokenChange = 0;
-    
+
     if (value.distance?.value !== undefined) {
       // Get old distance from database record
       const oldDistance = trip.distance?.value || 0;
-      
+
       // Get new distance from payload
       const newDistance = value.distance.value;
-      
+
       // Calculate token difference
       const oldTokens = await tokenController.calculateTripTokens(oldDistance);
       const newTokens = await tokenController.calculateTripTokens(newDistance);
       tokenChange = newTokens - oldTokens;
-      
+
       // If tokens increased, check if driver has sufficient balance
       if (tokenChange > 0) {
         const TokenWallet = require("../db/models/token_wallets");
@@ -1064,7 +1065,7 @@ exports.updateTrip = async (req, res) => {
         if (!wallet) {
           wallet = await TokenWallet.create({ driver: userId, balance: 0 });
         }
-        
+
         if (wallet.balance < tokenChange) {
           const response = badRequest(`Insufficient tokens for distance increase. Required: ${tokenChange}, Available: ${wallet.balance}`);
           return res.status(response.statusCode).json(response);
@@ -1104,7 +1105,7 @@ exports.updateTrip = async (req, res) => {
     }
 
     const response = updated(
-      { 
+      {
         trip: updatedTrip,
         tokenChange: tokenChange
       },
@@ -1317,6 +1318,11 @@ exports.deleteTrip = async (req, res) => {
 
     // Check if user can delete this trip
     const userType = await require("../db/models/user_types").findById(user.user_type);
+    if (userType.name === "customer") {
+      const response = forbidden("Access denied");
+      return res.status(response.statusCode).json(response);
+    }
+
     if (trip.tripAddedBy.toString() !== userId) {
       const response = forbidden("Access denied");
       return res.status(response.statusCode).json(response);
@@ -1325,6 +1331,18 @@ exports.deleteTrip = async (req, res) => {
     // Check if trip can be deleted
     if (['684942f5ff32840ef8e726f1', '684942f5ff32840ef8e726ef'].includes(trip.status)) {
       const response = badRequest("Cannot delete trip that is in progress or completed");
+      return res.status(response.statusCode).json(response);
+    }
+
+    // Disallow delete if there is any active connect request not in allowed terminal statuses
+    const hasBlockingConnect = await connect_requests.findOne({
+      trip: tripId,
+      isActive: true,
+      status: { $nin: ["rejected", "cancelled", "expired"] }
+    }).select({ _id: 1 }).lean();
+
+    if (hasBlockingConnect) {
+      const response = badRequest("Cannot delete: active connect requests are pending/accepted/hold for this trip");
       return res.status(response.statusCode).json(response);
     }
 
