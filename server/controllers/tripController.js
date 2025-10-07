@@ -883,6 +883,17 @@ exports.updateTrip = async (req, res) => {
     // Validate and process update data
     let updateData = { ...req.body };
 
+    const hasBooking = await bookings.findOne({
+      trip: tripId,
+      isActive: true,
+      status: { $nin: ["rejected", "cancelled", "expired"] }
+    }).select({ _id: 1 }).lean();
+
+    if (hasBooking) {
+      const response = badRequest("Cannot delete: active bookings are pending/accepted/picked_up/delivered for this trip");
+      return res.status(response.statusCode).json(response);
+    }
+
     // Validate coordinates format if provided - now expecting [lng, lat] arrays
     if (updateData.tripStartLocation && updateData.tripStartLocation.coordinates) {
       if (!Array.isArray(updateData.tripStartLocation.coordinates) || updateData.tripStartLocation.coordinates.length !== 2) {

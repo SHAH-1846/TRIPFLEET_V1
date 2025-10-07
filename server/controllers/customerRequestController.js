@@ -524,6 +524,17 @@ exports.updateRequest = async (req, res) => {
     const { requestId } = req.params;
     const userId = req.user.user_id;
 
+    const hasBooking = await bookings.findOne({
+      customerRequest: requestId,
+      isActive: true,
+      status: { $nin: ["rejected", "cancelled", "expired"] }
+    }).select({ _id: 1 }).lean();
+
+    if (hasBooking) {
+      const response = badRequest("Cannot delete: active bookings are pending/accepted/picked_up/delivered for this request");
+      return res.status(response.statusCode).json(response);
+    }
+
     // Validate request data
     const { error, value } = customerRequestSchemas.updateRequest.validate(req.body, {
       abortEarly: false,
