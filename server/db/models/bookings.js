@@ -52,7 +52,7 @@ const bookings = new mongoose.Schema(
     // Status lifecycle
     status: {
       type: String,
-      enum: ["pending", "confirmed", "rejected", "cancelled", "completed"],
+      enum: ["pending", "confirmed", "rejected", "cancelled", "expired", "picked_up", "delivered", "completed"],
       default: "pending",
       index: true,
     },

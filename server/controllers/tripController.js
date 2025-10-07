@@ -1346,6 +1346,19 @@ exports.deleteTrip = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
+    const hasBooking = await bookings.findOne({
+      trip: tripId,
+      isActive: true,
+      status: { $nin: ["rejected", "cancelled", "expired"] }
+    }).select({ _id: 1 }).lean();
+
+    console.log("hasBooking : ", hasBooking);
+
+    if (hasBooking) {
+      const response = badRequest("Cannot delete: active bookings are pending/confirmed/completed for this trip");
+      return res.status(response.statusCode).json(response);
+    }
+
     // Soft delete trip
     await trips.findByIdAndUpdate(tripId, {
       isActive: false,

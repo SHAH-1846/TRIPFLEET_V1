@@ -15,17 +15,17 @@ const connect_requests = require("../db/models/connect_requests");
 const customer_request_status = require("../db/models/customer_request_status");
 
 // Utils
-const { 
-  success, 
-  created, 
-  updated, 
-  deleted, 
-  badRequest, 
-  unauthorized, 
-  forbidden, 
-  notFound, 
-  conflict, 
-  serverError 
+const {
+  success,
+  created,
+  updated,
+  deleted,
+  badRequest,
+  unauthorized,
+  forbidden,
+  notFound,
+  conflict,
+  serverError
 } = require("../utils/response-handler");
 
 // Validation schemas
@@ -40,9 +40,9 @@ exports.createBooking = async (req, res) => {
     const userId = req.user.user_id;
 
     // Validate request data
-    const { error, value } = bookingSchemas.createBooking.validate(req.body, { 
-      abortEarly: false, 
-      stripUnknown: true 
+    const { error, value } = bookingSchemas.createBooking.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true
     });
 
     if (error) {
@@ -50,7 +50,7 @@ exports.createBooking = async (req, res) => {
         field: detail.path.join('.'),
         message: detail.message
       }));
-      
+
       const response = badRequest("Validation failed", errors);
       return res.status(response.statusCode).json(response);
     }
@@ -171,7 +171,8 @@ exports.createBooking = async (req, res) => {
     const populatedBooking = await bookings.findById(newBooking._id)
       .populate('trip')
       .populate('driver', 'name email phone')
-      .populate('customer', 'name email phone');
+      .populate('customer', 'name email phone')
+      .populate('customerRequest');
 
     const response = created({ booking: populatedBooking }, "Booking initiated successfully");
 
@@ -212,15 +213,15 @@ exports.getAllBookings = async (req, res) => {
         { recipient: userId },
       ];
     }
-    
+
     if (status) {
       filter.status = status;
     }
-    
+
     if (tripId) {
       filter.trip = tripId;
     }
-    
+
     if (dateFrom || dateTo) {
       filter.pickupDate = {};
       if (dateFrom) {
@@ -247,14 +248,14 @@ exports.getAllBookings = async (req, res) => {
     // Add canAcceptOrRejectCancellationRequest field to each booking
     const enhancedBookingsData = bookingsData.map(booking => {
       const bookingObj = booking.toObject();
-      
+
       // Determine if user can accept/reject cancellation request
       // User can accept/reject if:
       // 1. There's a pending cancellation (cancellationPending is true)
       // 2. User is NOT the one who requested the cancellation
       // 3. User is either initiator or recipient of the booking
       let canAcceptOrRejectCancellationRequest = false;
-      
+
       if (bookingObj.cancellationPending && bookingObj.cancellationRequestedBy) {
         const cancellationRequestedById = bookingObj.cancellationRequestedBy.toString();
         const isUserTheRequester = cancellationRequestedById === userId;
@@ -262,10 +263,10 @@ exports.getAllBookings = async (req, res) => {
           bookingObj.initiator?._id?.toString() || bookingObj.initiator?.toString(),
           bookingObj.recipient?._id?.toString() || bookingObj.recipient?.toString()
         ].includes(userId);
-        
+
         canAcceptOrRejectCancellationRequest = !isUserTheRequester && isUserParticipant;
       }
-      
+
       return {
         ...bookingObj,
         canAcceptOrRejectCancellationRequest
@@ -318,13 +319,13 @@ exports.getBookingById = async (req, res) => {
 
     // Get booking with populated data
     const booking = await bookings.findById(bookingId)
-    .populate('trip', 'pickupLocation dropLocation goodsType weight budget status')
-    .populate('customerRequest', 'customer')
-    .populate('driver', 'name email phone')
-    .populate('customer', 'name email phone')
-    .populate('initiator', 'name email phone')
-    .populate('recipient', 'name email phone')
-    .populate('connectRequest', 'initiator recipient');
+      .populate('trip', 'pickupLocation dropLocation goodsType weight budget status')
+      .populate('customerRequest', 'customer')
+      .populate('driver', 'name email phone')
+      .populate('customer', 'name email phone')
+      .populate('initiator', 'name email phone')
+      .populate('recipient', 'name email phone')
+      .populate('connectRequest', 'initiator recipient');
 
     if (!booking) {
       const response = notFound("Booking not found");
@@ -344,14 +345,14 @@ exports.getBookingById = async (req, res) => {
 
     // Add canAcceptOrRejectCancellationRequest field to booking
     const bookingObj = booking.toObject();
-    
+
     // Determine if user can accept/reject cancellation request
     // User can accept/reject if:
     // 1. There's a pending cancellation (cancellationPending is true)
     // 2. User is NOT the one who requested the cancellation
     // 3. User is either initiator or recipient of the booking
     let canAcceptOrRejectCancellationRequest = false;
-    
+
     if (bookingObj.cancellationPending && bookingObj.cancellationRequestedBy) {
       const cancellationRequestedById = bookingObj.cancellationRequestedBy.toString();
       const isUserTheRequester = cancellationRequestedById === userId;
@@ -359,10 +360,10 @@ exports.getBookingById = async (req, res) => {
         bookingObj.initiator?._id?.toString() || bookingObj.initiator?.toString(),
         bookingObj.recipient?._id?.toString() || bookingObj.recipient?.toString()
       ].includes(userId);
-      
+
       canAcceptOrRejectCancellationRequest = !isUserTheRequester && isUserParticipant;
     }
-    
+
     const enhancedBooking = {
       ...bookingObj,
       canAcceptOrRejectCancellationRequest
@@ -392,9 +393,9 @@ exports.updateBooking = async (req, res) => {
     const userId = req.user.user_id;
 
     // Validate request data
-    const { error, value } = bookingSchemas.updateBooking.validate(req.body, { 
-      abortEarly: false, 
-      stripUnknown: true 
+    const { error, value } = bookingSchemas.updateBooking.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true
     });
 
     if (error) {
@@ -402,7 +403,7 @@ exports.updateBooking = async (req, res) => {
         field: detail.path.join('.'),
         message: detail.message
       }));
-      
+
       const response = badRequest("Validation failed", errors);
       return res.status(response.statusCode).json(response);
     }
@@ -447,19 +448,19 @@ exports.updateBooking = async (req, res) => {
     // Update booking
     const updatedBooking = await bookings.findByIdAndUpdate(
       bookingId,
-      { 
+      {
         ...value,
         updatedAt: new Date()
       },
       { new: true }
     )
-    .populate('trip', 'pickupLocation dropLocation goodsType weight budget status')
-    .populate('customerRequest', 'customer')
-    .populate('driver', 'name email phone')
-    .populate('customer', 'name email phone')
-    .populate('initiator', 'name email phone')
-    .populate('recipient', 'name email phone')
-    .populate('connectRequest', 'initiator recipient');
+      .populate('trip', 'pickupLocation dropLocation goodsType weight budget status')
+      .populate('customerRequest', 'customer')
+      .populate('driver', 'name email phone')
+      .populate('customer', 'name email phone')
+      .populate('initiator', 'name email phone')
+      .populate('recipient', 'name email phone')
+      .populate('connectRequest', 'initiator recipient');
 
     const response = updated(
       { booking: updatedBooking },
@@ -494,7 +495,7 @@ exports.acceptBooking = async (req, res) => {
     // Get booking
     const booking = await bookings.findById(bookingId)
       .populate('trip', 'customer status');
-    
+
     if (!booking) {
       const response = notFound("Booking not found");
       return res.status(response.statusCode).json(response);
@@ -523,7 +524,7 @@ exports.acceptBooking = async (req, res) => {
     // Accept booking and set confirmed
     const updatedBooking = await bookings.findByIdAndUpdate(
       bookingId,
-      { 
+      {
         status: 'confirmed',
         recipientAccepted: true,
         acceptedAt: new Date(),
@@ -531,9 +532,9 @@ exports.acceptBooking = async (req, res) => {
       },
       { new: true }
     )
-    .populate('trip')
-    .populate('driver', 'name email phone')
-    .populate('customer', 'name email phone');
+      .populate('trip')
+      .populate('driver', 'name email phone')
+      .populate('customer', 'name email phone');
 
     // Business rules on acceptance:
     // 1) Update customerRequest status -> booked (684da132412825ef8b404715)
@@ -549,8 +550,8 @@ exports.acceptBooking = async (req, res) => {
 
     // 3) Reject other pending bookings for this trip OR same customerRequest
     await bookings.updateMany(
-      { 
-        $or: [ { trip: booking.trip._id }, { customerRequest: booking.customerRequest } ],
+      {
+        $or: [{ trip: booking.trip._id }, { customerRequest: booking.customerRequest }],
         _id: { $ne: bookingId },
         status: 'pending'
       },
@@ -608,7 +609,7 @@ exports.rejectBooking = async (req, res) => {
     // Get booking
     const booking = await bookings.findById(bookingId)
       .populate('trip', 'customer status');
-    
+
     if (!booking) {
       const response = notFound("Booking not found");
       return res.status(response.statusCode).json(response);
@@ -629,16 +630,16 @@ exports.rejectBooking = async (req, res) => {
     // Reject booking
     const updatedBooking = await bookings.findByIdAndUpdate(
       bookingId,
-      { 
+      {
         status: 'rejected',
         rejectedAt: new Date(),
         updatedAt: new Date()
       },
       { new: true }
     )
-    .populate('trip')
-    .populate('driver', 'name email phone')
-    .populate('customer', 'name email phone');
+      .populate('trip')
+      .populate('driver', 'name email phone')
+      .populate('customer', 'name email phone');
 
     const response = updated(
       { booking: updatedBooking },
@@ -664,9 +665,9 @@ exports.cancelBooking = async (req, res) => {
     const userId = req.user.user_id;
 
     // Validate request data
-    const { error, value } = bookingSchemas.cancelBooking.validate(req.body, { 
-      abortEarly: false, 
-      stripUnknown: true 
+    const { error, value } = bookingSchemas.cancelBooking.validate(req.body, {
+      abortEarly: false,
+      stripUnknown: true
     });
 
     if (error) {
@@ -674,7 +675,7 @@ exports.cancelBooking = async (req, res) => {
         field: detail.path.join('.'),
         message: detail.message
       }));
-      
+
       const response = badRequest("Validation failed", errors);
       return res.status(response.statusCode).json(response);
     }
@@ -691,7 +692,7 @@ exports.cancelBooking = async (req, res) => {
       .populate('trip', 'status')
       .populate('initiator', 'name')
       .populate('recipient', 'name');
-    
+
     if (!booking) {
       const response = notFound("Booking not found");
       return res.status(response.statusCode).json(response);
@@ -709,8 +710,8 @@ exports.cancelBooking = async (req, res) => {
     }
 
     // If already cancelled or completed, block
-    if (['completed', 'cancelled'].includes(booking.status)) {
-      const response = badRequest("Booking is already completed or cancelled");
+    if (['completed', 'cancelled', "rejected", "expired", "picked_up", "delivered"].includes(booking.status)) {
+      const response = badRequest("Booking is already cancelled/rejected/expired/picked_up/delivered/completed");
       return res.status(response.statusCode).json(response);
     }
 
@@ -729,9 +730,9 @@ exports.cancelBooking = async (req, res) => {
           },
           { new: true }
         )
-        .populate('trip')
-        .populate('driver', 'name email phone')
-        .populate('customer', 'name email phone');
+          .populate('trip')
+          .populate('driver', 'name email phone')
+          .populate('customer', 'name email phone');
 
         const response = updated(
           { booking: updatedBooking },
@@ -762,9 +763,18 @@ exports.cancelBooking = async (req, res) => {
         },
         { new: true }
       )
-      .populate('trip')
-      .populate('driver', 'name email phone')
-      .populate('customer', 'name email phone');
+        .populate('trip')
+        .populate('driver', 'name email phone')
+        .populate('customer', 'name email phone');
+
+      // Update customerRequest status to pending after booking cancellation
+      if (updatedBooking && updatedBooking.customerRequest) { // ADDED
+        await customer_requests.updateOne( // ADDED
+          { _id: updatedBooking.customerRequest }, // ADDED
+          { $set: { status: '684da120412825ef8b404712', updatedAt: new Date() } } // ADDED
+        ); // ADDED
+      } // ADDED
+
 
       const response = updated(
         { booking: updatedBooking },
@@ -776,7 +786,7 @@ exports.cancelBooking = async (req, res) => {
     // If not confirmed (e.g., pending), allow direct cancel by either participant
     const updatedBooking = await bookings.findByIdAndUpdate(
       bookingId,
-      { 
+      {
         status: 'cancelled',
         cancelledAt: new Date(),
         cancelledBy: userId,
@@ -786,9 +796,18 @@ exports.cancelBooking = async (req, res) => {
       },
       { new: true }
     )
-    .populate('trip')
-    .populate('driver', 'name email phone')
-    .populate('customer', 'name email phone');
+      .populate('trip')
+      .populate('driver', 'name email phone')
+      .populate('customer', 'name email phone');
+
+
+    // Update customerRequest status to pending after booking cancellation
+    if (updatedBooking && updatedBooking.customerRequest) { // ADDED
+      await customer_requests.updateOne( // ADDED
+        { _id: updatedBooking.customerRequest }, // ADDED
+        { $set: { status: '684da120412825ef8b404712', updatedAt: new Date() } } // ADDED
+      ); // ADDED
+    } // ADDED
 
     const response = updated(
       { booking: updatedBooking },
@@ -848,16 +867,16 @@ exports.completeBooking = async (req, res) => {
     // Complete booking
     const updatedBooking = await bookings.findByIdAndUpdate(
       bookingId,
-      { 
+      {
         status: 'completed',
         completedAt: new Date(),
         updatedAt: new Date()
       },
       { new: true }
     )
-    .populate('trip')
-    .populate('driver', 'name email phone')
-    .populate('customer', 'name email phone');
+      .populate('trip')
+      .populate('driver', 'name email phone')
+      .populate('customer', 'name email phone');
 
     // Update trip status
     await trips.findByIdAndUpdate(booking.trip, {
@@ -950,7 +969,7 @@ exports.getBookingStats = async (req, res) => {
     // Build filter based on user role
     const filter = { isActive: true };
     const userType = await require("../db/models/user_types").findById(user.user_type);
-    
+
     if (userType.name === 'driver') {
       filter.driver = userId;
     } else if (userType.name === 'customer') {

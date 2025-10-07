@@ -12,6 +12,7 @@ const connect_requests = require("../db/models/connect_requests");
 const users = require("../db/models/users");
 const images = require("../db/models/images");
 const customerRequestStatus = require("../db/models/customer_request_status");
+const bookings = require("../db/models/bookings");
 
 // Utils
 const {
@@ -828,6 +829,17 @@ exports.deleteRequest = async (req, res) => {
 
     if (hasBlockingConnect) {
       const response = badRequest("Cannot delete: active connect requests are pending/accepted/hold for this lead");
+      return res.status(response.statusCode).json(response);
+    }
+
+    const hasBooking = await bookings.findOne({
+      customerRequest: requestId,
+      isActive: true,
+      status: { $nin: ["rejected", "cancelled", "expired"] }
+    }).select({ _id: 1 }).lean();
+
+    if (hasBooking) {
+      const response = badRequest("Cannot delete: active bookings are pending/accepted/picked_up/delivered for this lead");
       return res.status(response.statusCode).json(response);
     }
 
