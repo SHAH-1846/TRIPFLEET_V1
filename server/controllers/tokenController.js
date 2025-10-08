@@ -354,6 +354,63 @@ exports.upsertBookingRewardSettings = async (req, res) => {
   }
 };
 
+exports.getBookingReward = async (req, res) => {
+  try {
+    // Get and validate query params
+    const { distanceKm, stage } = req.query;
+    const validStages = ['confirmation', 'pickup', 'delivery'];
+    const kmVal = Number(distanceKm);
+
+    if (!distanceKm || !stage || !validStages.includes(stage)) {
+      return res.status(400).json({
+        success: false,
+        message: "Required params: distanceKm (number), stage (confirmation|pickup|delivery)"
+      });
+    }
+    if (!Number.isFinite(kmVal) || kmVal < 0) {
+      return res.status(400).json({
+        success: false,
+        message: "distanceKm must be a non-negative number"
+      });
+    }
+
+    // Fetch current settings
+    const settings = await BookingRewardSettings.findOne({ isActive: true }).sort({ effectiveAt: -1 }).lean();
+    if (!settings) {
+      return res.status(404).json({ success: false, message: "Reward settings not configured" });
+    }
+
+    const slab = findSlab(settings.distanceSlabs, kmVal);
+    if (!slab) {
+      return res.status(404).json({ success: false, message: "No matching distance slab found for this distance" });
+    }
+
+    const pct = stage === 'confirmation' ? settings.confirmationPct
+      : stage === 'pickup' ? settings.pickupPct
+        : stage === 'delivery' ? settings.deliveryPct
+          : 0;
+
+    const tokens = Math.floor((slab.baseTokens * pct) / 100);
+
+    return res.json({
+      success: true,
+      distanceKm: kmVal,
+      stage,
+      baseTokens: slab.baseTokens,
+      percent: pct,
+      tokens,
+      minMinutesConfirmToPickup: slab.minMinutesConfirmToPickup,
+      minMinutesPickupToDelivery: slab.minMinutesPickupToDelivery,
+      slab,
+    });
+
+  } catch (err) {
+    console.error("getBookingReward error", err);
+    return res.status(500).json({ success: false, message: "Failed to compute booking reward" });
+  }
+};
+
+
 
 // Admin: free tokens settings
 exports.upsertFreeTokenSettings = async (req, res) => {

@@ -53,5 +53,7 @@ router.post(
   tokenController.upsertBookingRewardSettings
 );
 
+router.get('/compute-booking-reward', tokenController.getBookingReward);
+
 
 module.exports = router;

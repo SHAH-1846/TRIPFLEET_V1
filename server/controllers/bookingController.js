@@ -13,6 +13,8 @@ const users = require("../db/models/users");
 const customer_requests = require("../db/models/customer_requests");
 const connect_requests = require("../db/models/connect_requests");
 const customer_request_status = require("../db/models/customer_request_status");
+const BookingRewardSettings = require('../db/models/booking_reward_settings');
+const tokenController = require('./tokenController');
 
 // Utils
 const {
@@ -533,6 +535,7 @@ exports.acceptBooking = async (req, res) => {
       { new: true }
     )
       .populate('trip')
+      .populate('customerRequest')
       .populate('driver', 'name email phone')
       .populate('customer', 'name email phone');
 
@@ -575,6 +578,25 @@ exports.acceptBooking = async (req, res) => {
         updatedAt: new Date(),
       }
     );
+
+    // ---- New: Credit tokens to driver based on booking_reward_settings ----
+    const rewardSettings = await BookingRewardSettings.findOne({ isActive: true }).sort({ effectiveAt: -1 }).lean();
+
+    if (rewardSettings && updatedBooking.customerRequest) {
+      const distanceKm = updatedBooking.customerRequest.distance?.value ? updatedBooking.customerRequest.distance.value / 1000 : 0;
+      const slab = rewardSettings.distanceSlabs.find(s => distanceKm >= s.minKm && distanceKm < s.maxKm);
+      if (slab) {
+        const tokensToCredit = Math.floor((slab.baseTokens * rewardSettings.confirmationPct) / 100);
+        if (tokensToCredit > 0) {
+          await tokenController.creditTokens(
+            updatedBooking.driver,
+            tokensToCredit,
+            `Booking confirmation reward for booking ${bookingId} (${distanceKm.toFixed(1)} km)`,
+            userId
+          );
+        }
+      }
+    }
 
     const response = updated(
       { booking: updatedBooking },
