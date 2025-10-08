@@ -528,6 +528,16 @@ const fileSchemas = {
   }),
 };
 
+const distanceSlab = Joi.object({
+  minKm: Joi.number().min(0).required(),
+  maxKm: Joi.number().min(Joi.ref('minKm')).required(),
+  baseTokens: Joi.number().integer().min(0).required(),
+
+  // NEW: minute thresholds per slab
+  minMinutesConfirmToPickup: Joi.number().integer().min(0).required(),
+  minMinutesPickupToDelivery: Joi.number().integer().min(0).required(),
+});
+
 // Token module schemas
 const tokenSchemas = {
   createTokenPlan: Joi.object({
@@ -595,6 +605,24 @@ const tokenSchemas = {
   freeTokenSettingsUpsert: Joi.object({
     tokensOnRegistration: Joi.number().integer().min(0).required(),
     isActive: Joi.boolean().optional(),
+  }),
+
+  bookingRewardSettingsUpsert: Joi.object({
+    isActive: Joi.boolean().optional(),
+    confirmationPct: Joi.number().min(0).max(100).required(),
+    pickupPct: Joi.number().min(0).max(100).required(),
+    deliveryPct: Joi.number().min(0).max(100).required(),
+    distanceSlabs: Joi.array().items(distanceSlab).min(1).required(),
+    effectiveAt: Joi.date().optional(),
+  }).custom((val, helpers) => {
+    // Optional: validate slabs are non-overlapping and contiguous if needed
+    const slabs = [...val.distanceSlabs].sort((a, b) => a.minKm - b.minKm);
+    for (let i = 0; i < slabs.length; i++) {
+      const s = slabs[i];
+      if (s.maxKm <= s.minKm) return helpers.error("any.invalid", "maxKm must be > minKm");
+      if (i > 0 && s.minKm < slabs[i - 1].maxKm) return helpers.error("any.invalid", "distance slabs overlap");
+    }
+    return val;
   }),
 };
 

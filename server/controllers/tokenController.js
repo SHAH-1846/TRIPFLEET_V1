@@ -6,6 +6,7 @@ const TokenTxn = require("../db/models/token_transactions");
 const LeadTokens = require("../db/models/lead_tokens");
 const TripTokens = require("../db/models/trip_tokens");
 const FreeTokenSettings = require("../db/models/free_token_settings");
+const BookingRewardSettings = require('../db/models/booking_reward_settings');
 const users = require("../db/models/users");
 
 const {
@@ -331,6 +332,29 @@ exports.deleteTripTokens = async (req, res) => {
   }
 };
 
+exports.upsertBookingRewardSettings = async (req, res) => {
+  try {
+    const { error, value } = tokenSchemas.bookingRewardSettingsUpsert.validate(req.body, { abortEarly: false, stripUnknown: true });
+    if (error) return res.status(400).json(badRequest("Validation failed", error.details));
+
+    let settings = await BookingRewardSettings.findOne({ isActive: true }).sort({ effectiveAt: -1 });
+    if (!settings) {
+      settings = await BookingRewardSettings.create({ ...value, addedBy: req.user.user_id });
+    } else {
+      settings = await BookingRewardSettings.findByIdAndUpdate(
+        settings._id,
+        { ...value, lastUpdatedBy: req.user.user_id, updatedAt: new Date() },
+        { new: true }
+      );
+    }
+    return res.json(updated({ settings }, "Booking reward settings saved"));
+  } catch (err) {
+    console.error("upsertBookingRewardSettings error", err);
+    return res.status(500).json(serverError("Failed to save booking reward settings"));
+  }
+};
+
+
 // Admin: free tokens settings
 exports.upsertFreeTokenSettings = async (req, res) => {
   try {
@@ -418,6 +442,25 @@ exports.creditFreeTokensIfAny = async (driverId) => {
   const wallet = await creditTokens(driverId, settings.tokensOnRegistration, "Free tokens on registration", null);
   return wallet;
 };
+
+const findSlab = (slabs, km) => slabs.find(s => km >= s.minKm && km < s.maxKm);
+
+exports.computeBookingReward = async (distanceKm, stage /* 'confirmation' | 'pickup' | 'delivery' */) => {
+  const settings = await BookingRewardSettings.findOne({ isActive: true }).sort({ effectiveAt: -1 }).lean();
+  if (!settings) return 0;
+
+  const slab = findSlab(settings.distanceSlabs, distanceKm ?? 0);
+  if (!slab) return 0;
+
+  const pct = stage === 'confirmation' ? settings.confirmationPct
+    : stage === 'pickup' ? settings.pickupPct
+      : stage === 'delivery' ? settings.deliveryPct
+        : 0;
+
+  const tokens = Math.floor((slab.baseTokens * pct) / 100);
+  return tokens;
+};
+
 
 // Export calculation functions for use in other controllers
 exports.calculateTripTokens = calculateTripTokens;

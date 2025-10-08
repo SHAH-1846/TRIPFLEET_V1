@@ -45,4 +45,13 @@ router.delete('/trip-bands/:bandId', authenticateToken, requireRole(['admin']), 
 // Admin: free tokens settings
 router.post('/free-tokens', authenticateToken, requireRole(['admin']), sanitizeInput, tokenController.upsertFreeTokenSettings);
 
+router.post(
+  '/booking-reward-settings',
+  authenticateToken,
+  requireRole(['admin']),
+  sanitizeInput,
+  tokenController.upsertBookingRewardSettings
+);
+
+
 module.exports = router;
