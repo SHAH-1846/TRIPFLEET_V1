@@ -10,10 +10,10 @@ const router = express.Router();
 const bookingController = require('../controllers/bookingController');
 
 // Middleware
-const { 
-  authenticateToken, 
-  requireRole, 
-  validateRequest, 
+const {
+  authenticateToken,
+  requireRole,
+  validateRequest,
   sanitizeInput,
   validateObjectId,
   pagination
@@ -141,5 +141,13 @@ router.delete('/:bookingId',
   validateObjectId('bookingId'),
   bookingController.deleteBooking
 );
+
+// generate OTPs
+router.post('/:bookingId/otp/pickup/generate', authenticateToken, sanitizeInput, bookingController.generatePickupOtp);
+router.post('/:bookingId/otp/delivery/generate', authenticateToken, sanitizeInput, bookingController.generateDeliveryOtp);
+
+// verify OTPs and complete milestones
+router.post('/:bookingId/pickup/verify-otp', authenticateToken, sanitizeInput, bookingController.verifyPickupOtpAndPickup);
+router.post('/:bookingId/delivery/verify-otp', authenticateToken, sanitizeInput, bookingController.verifyDeliveryOtpAndDeliver);
 
 module.exports = router;

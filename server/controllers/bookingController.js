@@ -15,6 +15,8 @@ const connect_requests = require("../db/models/connect_requests");
 const customer_request_status = require("../db/models/customer_request_status");
 const BookingRewardSettings = require('../db/models/booking_reward_settings');
 const tokenController = require('./tokenController');
+const mongoose = require('mongoose');
+const BookingOtp = require('../db/models/booking_otps'); // define as described
 
 // Utils
 const {
@@ -1095,3 +1097,279 @@ exports.getBookingStats = async (req, res) => {
     return res.status(response.statusCode).json(response);
   }
 };
+
+const randomCode = (len = 6) => Array.from({ length: len }, () => Math.floor(Math.random() * 10)).join('');
+
+const findSlab = (slabs, km) => slabs.find(s => km >= s.minKm && km < s.maxKm);
+
+const getDistanceKm = (cr) => (cr?.distance?.value || 0) / 1000;
+
+const loadActiveRewardSettings = () => BookingRewardSettings.findOne({ isActive: true }).sort({ effectiveAt: -1 }).lean();
+
+const computeStageTokens = (settings, distanceKm, stage) => {
+  const slab = findSlab(settings.distanceSlabs, distanceKm);
+  if (!slab) return { tokens: 0, slab: null };
+  const pct = stage === 'pickup' ? settings.pickupPct : stage === 'delivery' ? settings.deliveryPct : 0;
+  return { tokens: Math.floor((slab.baseTokens * pct) / 100), slab };
+};
+
+const assertTimeThreshold = (slab, fromAt, toAt, stage) => {
+  const minutes = (new Date(toAt) - new Date(fromAt)) / 60000;
+  console.log("minutes : ", minutes);
+  if (stage === 'pickup') {
+    return minutes >= slab.minMinutesConfirmToPickup ? null : { need: slab.minMinutesConfirmToPickup, have: minutes, code: 'too_fast_confirm_to_pickup' };
+  }
+  if (stage === 'delivery') {
+    return minutes >= slab.minMinutesPickupToDelivery ? null : { need: slab.minMinutesPickupToDelivery, have: minutes, code: 'too_fast_pickup_to_delivery' };
+  }
+  return null;
+};
+
+// OTP generation common
+const generateOtp = async (req, res, bookingId, kind, issuedTo) => {
+  try {
+    const userId = req.user.user_id;
+
+    const booking = await bookings.findById(bookingId).populate('driver customer customerRequest');
+    if (!booking) return res.status(404).json(notFound("Booking not found"));
+
+    const user = await users.findById(userId);
+    if (!user || !user.isActive) return res.status(401).json(unauthorized("User not found or inactive"));
+
+    // Only participants or admin can generate
+    const userType = await require("../db/models/user_types").findById(user.user_type);
+    if (userType.name !== 'admin') {
+      const driverId = booking.driver?._id?.toString() || booking.driver?.toString();
+      const customerId = booking.customer?._id?.toString() || booking.customer?.toString();
+      if (![driverId, customerId].includes(userId)) {
+        return res.status(403).json(forbidden("Access denied"));
+      }
+    }
+
+    // Basic status guard
+    if (kind === 'pickup' && booking.status !== 'confirmed') {
+      return res.status(400).json(badRequest("Booking must be confirmed to generate pickup OTP"));
+    }
+    if (kind === 'delivery' && !['picked_up'].includes(booking.status)) {
+      return res.status(400).json(badRequest("Booking must be picked_up to generate delivery OTP"));
+    }
+
+    // Invalidate previous active OTPs of same kind
+    await BookingOtp.updateMany({ booking: booking._id, kind, isActive: true, consumedAt: null }, { isActive: false, updatedAt: new Date() });
+
+    const code = randomCode(6);
+    const otp = await BookingOtp.create({
+      booking: booking._id,
+      kind,
+      code,
+      issuedTo, // 'driver' or 'customer' — who must enter this code
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000), // 10 minutes
+      maxAttempts: 5,
+      attempts: 0,
+      isActive: true,
+      addedBy: userId
+    });
+
+    return res.status(200).json(created({ otpId: otp._id, code }, "OTP generated"));
+  } catch (e) {
+    console.error("generateOtp error:", e);
+    return res.status(500).json(serverError("Failed to generate OTP"));
+  }
+};
+
+exports.generatePickupOtp = (req, res) => generateOtp(req, res, req.params.bookingId, 'pickup', 'customer'); // typically customer gives code to driver
+exports.generateDeliveryOtp = (req, res) => generateOtp(req, res, req.params.bookingId, 'delivery', 'customer'); // or recipient confirms delivery
+
+// Verify pickup OTP and mark picked_up with reward
+exports.verifyPickupOtpAndPickup = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const { code } = req.body;
+    const userId = req.user.user_id;
+
+    if (!code) return res.status(400).json(badRequest("OTP code required"));
+
+    const user = await users.findById(userId);
+    if (!user || !user.isActive) return res.status(401).json(unauthorized("User not found or inactive"));
+
+    let booking = await bookings.findById(bookingId).populate('driver customer customerRequest');
+    if (!booking) return res.status(404).json(notFound("Booking not found"));
+
+    // Only driver or customer (or admin) can verify
+    const userType = await require("../db/models/user_types").findById(user.user_type);
+    if (userType.name !== 'admin') {
+      const driverId = booking.driver?._id?.toString() || booking.driver?.toString();
+      const customerId = booking.customer?._id?.toString() || booking.customer?.toString();
+      if (![driverId, customerId].includes(userId)) {
+        return res.status(403).json(forbidden("Access denied"));
+      }
+    }
+
+    if (booking.status !== 'confirmed') {
+      return res.status(400).json(badRequest("Booking is not ready for pickup"));
+    }
+
+    // Find active pickup OTP issued to the counterparty (commonly customer provides code and driver enters)
+    const otp = await BookingOtp.findOne({ booking: booking._id, kind: 'pickup', isActive: true }).sort({ createdAt: -1 });
+    if (!otp) return res.status(400).json(badRequest("No active pickup OTP"));
+    if (new Date() > otp.expiresAt) return res.status(400).json(badRequest("OTP expired"));
+
+    if (otp.code !== code) {
+      // increment attempts and maybe deactivate
+      const attempts = (otp.attempts || 0) + 1;
+      const deactivate = attempts >= (otp.maxAttempts || 5);
+      await BookingOtp.updateOne({ _id: otp._id }, { $set: { attempts, isActive: deactivate ? false : true, updatedAt: new Date() } });
+      return res.status(400).json(badRequest(deactivate ? "Too many attempts, OTP deactivated" : "Invalid OTP"));
+    }
+
+    if (otp.addedBy.toString() !== userId) {
+      return res.status(400).json(badRequest("Only the OTP initiator can verify this code"));
+    }
+
+    // Ensure caller is a participant or admin
+    const driverId = booking.driver?._id?.toString() || booking.driver?.toString();
+    const customerId = booking.customer?._id?.toString() || booking.customer?.toString();
+    const isAdmin = userType?.name?.toLowerCase() === 'admin';
+    const isParticipant = [driverId, customerId].includes(userId);
+    if (!isAdmin && !isParticipant) {
+      return res.status(403).json(forbidden("Access denied"));
+    }
+    // Consume OTP
+    await BookingOtp.updateOne({ _id: otp._id }, { $set: { isActive: false, consumedAt: new Date(), updatedAt: new Date() } });
+
+    // Time threshold and token computation
+    const settings = await loadActiveRewardSettings();
+    if (!settings) return res.status(500).json(serverError("Reward settings not configured"));
+
+    const cr = await customer_requests.findById(booking.customerRequest).lean();
+    const distanceKm = getDistanceKm(cr);
+
+    const { tokens, slab } = computeStageTokens(settings, distanceKm, 'pickup');
+    if (!slab) return res.status(400).json(badRequest("No matching distance slab for pickup"));
+
+    // enforce min time from confirmation to pickup
+    if (!booking.acceptedAt) return res.status(400).json(badRequest("Missing acceptedAt timestamp"));
+    const thresholdViolation = assertTimeThreshold(slab, booking.acceptedAt, new Date(), 'pickup');
+    if (thresholdViolation) {
+      return res.status(400).json(badRequest("Pickup too soon to qualify", thresholdViolation));
+    }
+
+    // Update booking to picked_up
+    booking = await bookings.findByIdAndUpdate(
+      bookingId,
+      { status: 'picked_up', pickupAt: new Date(), updatedAt: new Date() },
+      { new: true }
+    )
+      .populate('driver', 'name email phone')
+      .populate('customer', 'name email phone')
+      .populate('customerRequest');
+
+    // Update customer_request status if you track operational state there
+    // e.g., set status to an operational "in_transit" id or keep booked; adjust to your model
+    // await customer_requests.updateOne({ _id: booking.customerRequest }, { $set: { status: 'in_transit_status_id', updatedAt: new Date() } });
+
+    // Credit pickup reward to driver
+    if (tokens > 0) {
+      await tokenController.creditTokens(
+        booking.driver?._id || booking.recipient, // choose the driver id field used in your booking
+        tokens,
+        `Pickup reward (${distanceKm.toFixed(1)} km, booking ${bookingId})`,
+        userId
+      );
+    }
+
+    return res.status(200).json(updated({ booking, reward: { stage: 'pickup', tokens } }, "Pickup confirmed"));
+
+  } catch (e) {
+    console.error("verifyPickupOtpAndPickup error:", e);
+    return res.status(500).json(serverError("Failed to verify pickup"));
+  }
+};
+
+// Verify delivery OTP and mark delivered with reward
+exports.verifyDeliveryOtpAndDeliver = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const { code } = req.body;
+    const userId = req.user.user_id;
+
+    if (!code) return res.status(400).json(badRequest("OTP code required"));
+
+    const user = await users.findById(userId);
+    if (!user || !user.isActive) return res.status(401).json(unauthorized("User not found or inactive"));
+
+    let booking = await bookings.findById(bookingId).populate('driver customer customerRequest');
+    if (!booking) return res.status(404).json(notFound("Booking not found"));
+
+    const userType = await require("../db/models/user_types").findById(user.user_type);
+    if (userType.name !== 'admin') {
+      const driverId = booking.driver?._id?.toString() || booking.driver?.toString();
+      const customerId = booking.customer?._id?.toString() || booking.customer?.toString();
+      if (![driverId, customerId].includes(userId)) {
+        return res.status(403).json(forbidden("Access denied"));
+      }
+    }
+
+    if (booking.status !== 'picked_up') {
+      return res.status(400).json(badRequest("Booking is not ready for delivery"));
+    }
+
+    const otp = await BookingOtp.findOne({ booking: booking._id, kind: 'delivery', isActive: true }).sort({ createdAt: -1 });
+    if (!otp) return res.status(400).json(badRequest("No active delivery OTP"));
+    if (new Date() > otp.expiresAt) return res.status(400).json(badRequest("OTP expired"));
+
+    if (otp.code !== code) {
+      const attempts = (otp.attempts || 0) + 1;
+      const deactivate = attempts >= (otp.maxAttempts || 5);
+      await BookingOtp.updateOne({ _id: otp._id }, { $set: { attempts, isActive: deactivate ? false : true, updatedAt: new Date() } });
+      return res.status(400).json(badRequest(deactivate ? "Too many attempts, OTP deactivated" : "Invalid OTP"));
+    }
+
+    await BookingOtp.updateOne({ _id: otp._id }, { $set: { isActive: false, consumedAt: new Date(), updatedAt: new Date() } });
+
+    const settings = await loadActiveRewardSettings();
+    if (!settings) return res.status(500).json(serverError("Reward settings not configured"));
+
+    const cr = await customer_requests.findById(booking.customerRequest).lean();
+    const distanceKm = getDistanceKm(cr);
+
+    const { tokens, slab } = computeStageTokens(settings, distanceKm, 'delivery');
+    if (!slab) return res.status(400).json(badRequest("No matching distance slab for delivery"));
+
+    if (!booking.pickupAt) return res.status(400).json(badRequest("Missing pickupAt timestamp"));
+    const thresholdViolation = assertTimeThreshold(slab, booking.pickupAt, new Date(), 'delivery');
+    if (thresholdViolation) {
+      return res.status(400).json(badRequest("Delivery too soon to qualify", thresholdViolation));
+    }
+
+    // Update booking to delivered (and optionally completed)
+    booking = await bookings.findByIdAndUpdate(
+      bookingId,
+      { status: 'delivered', deliveredAt: new Date(), updatedAt: new Date() },
+      { new: true }
+    )
+      .populate('driver', 'name email phone')
+      .populate('customer', 'name email phone')
+      .populate('customerRequest');
+
+    // Update customer_request status to your delivered/completed status id as per your workflow
+    // await customer_requests.updateOne({ _id: booking.customerRequest }, { $set: { status: 'delivered_status_id', updatedAt: new Date() } });
+
+    if (tokens > 0) {
+      await tokenController.creditTokens(
+        booking.driver?._id || booking.recipient,
+        tokens,
+        `Delivery reward (${distanceKm.toFixed(1)} km, booking ${bookingId})`,
+        userId,
+        `booking:${bookingId}:delivery_reward`
+      );
+    }
+
+    return res.status(200).json(updated({ booking, reward: { stage: 'delivery', tokens } }, "Delivery confirmed"));
+
+  } catch (e) {
+    console.error("verifyDeliveryOtpAndDeliver error:", e);
+    return res.status(500).json(serverError("Failed to verify delivery"));
+  }
+};
+
