@@ -737,6 +737,54 @@ exports.cancelBooking = async (req, res) => {
       return res.status(response.statusCode).json(response);
     }
 
+    // Helper to update CR back to pending
+    const setCustomerRequestPending = async (crId) => {
+      if (!crId) return;
+      await customer_requests.updateOne(
+        { _id: crId },
+        { $set: { status: '684da120412825ef8b404712', updatedAt: new Date() } }
+      );
+    };
+
+    // Helper to claw back confirmation reward if booking had been confirmed before
+    const clawbackConfirmationReward = async (bk) => {
+      try {
+        // Consider it confirmed if it has acceptedAt or the last known status was 'confirmed'
+        const wasConfirmed = !!bk.acceptedAt || bk.status === 'confirmed';
+        if (!wasConfirmed) return;
+
+        // Ensure we have the customer request distance
+        const cr = await customer_requests.findById(bk.customerRequest).lean();
+        const distanceKm = cr?.distance?.value ? cr.distance.value / 1000 : 0;
+
+        // Load active reward settings
+        const rewardSettings = await BookingRewardSettings.findOne({ isActive: true }).sort({ effectiveAt: -1 }).lean();
+        if (!rewardSettings) return;
+
+        const slab = rewardSettings.distanceSlabs.find(s => distanceKm >= s.minKm && distanceKm < s.maxKm);
+        if (!slab) return;
+
+        const confirmationTokens = Math.floor((slab.baseTokens * rewardSettings.confirmationPct) / 100);
+        console.log("confirmationTokens : ", confirmationTokens);
+        if (confirmationTokens > 0) {
+          // Optional idempotency: if your booking doc has flags, check them here (e.g., confirmationRewardCredited && !confirmationRewardClawedBack)
+          await tokenController.debitTokens(
+            bk.driver, // driver user id
+            confirmationTokens,
+            `Clawback: booking cancelled after confirmation (${distanceKm.toFixed(1)} km, booking ${bk._id})`,
+            userId,
+            `booking:${bk._id}:confirmation_clawback`
+          );
+
+          // If you maintain flags on booking, set them here to avoid double clawbacks:
+          // await bookings.updateOne({ _id: bk._id }, { $set: { confirmationRewardClawedBack: true } });
+        }
+      } catch (clawErr) {
+        console.error("Clawback error on cancellation:", clawErr);
+        // Do not block overall cancellation; optionally notify ops.
+      }
+    };
+
     // Two-step cancellation when confirmed: first participant requests, second confirms
     if (booking.status === 'confirmed') {
       // If no pending request, create one by current user
@@ -790,12 +838,18 @@ exports.cancelBooking = async (req, res) => {
         .populate('customer', 'name email phone');
 
       // Update customerRequest status to pending after booking cancellation
-      if (updatedBooking && updatedBooking.customerRequest) { // ADDED
-        await customer_requests.updateOne( // ADDED
-          { _id: updatedBooking.customerRequest }, // ADDED
-          { $set: { status: '684da120412825ef8b404712', updatedAt: new Date() } } // ADDED
-        ); // ADDED
-      } // ADDED
+      await setCustomerRequestPending(updatedBooking?.customerRequest);
+
+      // Claw back confirmation reward (if previously credited)
+      await clawbackConfirmationReward(booking);
+
+      // // Update customerRequest status to pending after booking cancellation
+      // if (updatedBooking && updatedBooking.customerRequest) { // ADDED
+      //   await customer_requests.updateOne( // ADDED
+      //     { _id: updatedBooking.customerRequest }, // ADDED
+      //     { $set: { status: '684da120412825ef8b404712', updatedAt: new Date() } } // ADDED
+      //   ); // ADDED
+      // } // ADDED
 
 
       const response = updated(
@@ -824,12 +878,19 @@ exports.cancelBooking = async (req, res) => {
 
 
     // Update customerRequest status to pending after booking cancellation
-    if (updatedBooking && updatedBooking.customerRequest) { // ADDED
-      await customer_requests.updateOne( // ADDED
-        { _id: updatedBooking.customerRequest }, // ADDED
-        { $set: { status: '684da120412825ef8b404712', updatedAt: new Date() } } // ADDED
-      ); // ADDED
-    } // ADDED
+    await setCustomerRequestPending(updatedBooking?.customerRequest);
+
+    // For non-confirmed cancellations, no clawback is needed by default.
+    // If there are edge-cases where a booking previously became confirmed, add a guard like above:
+    // await clawbackConfirmationReward(booking);
+
+    // Update customerRequest status to pending after booking cancellation
+    // if (updatedBooking && updatedBooking.customerRequest) { // ADDED
+    //   await customer_requests.updateOne( // ADDED
+    //     { _id: updatedBooking.customerRequest }, // ADDED
+    //     { $set: { status: '684da120412825ef8b404712', updatedAt: new Date() } } // ADDED
+    //   ); // ADDED
+    // } // ADDED
 
     const response = updated(
       { booking: updatedBooking },
