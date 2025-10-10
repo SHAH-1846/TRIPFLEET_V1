@@ -35,6 +35,11 @@ const {
 // Validation schemas
 const { bookingSchemas } = require("../validations/schemas");
 
+
+const PICKEDUP_STATUS_ID = '684da13e412825ef8b404716';
+const DELIVERED_STATUS_ID = '684da149412825ef8b404717';
+
+
 /**
  * Create a new booking
  * @route POST /api/v1/bookings
@@ -1229,6 +1234,8 @@ exports.verifyPickupOtpAndPickup = async (req, res) => {
     // Ensure caller is a participant or admin
     const driverId = booking.driver?._id?.toString() || booking.driver?.toString();
     const customerId = booking.customer?._id?.toString() || booking.customer?.toString();
+    const customerRequest = booking.customerRequest?._id?.toString() || booking.customerRequest?.toString();
+
     const isAdmin = userType?.name?.toLowerCase() === 'admin';
     const isParticipant = [driverId, customerId].includes(userId);
     if (!isAdmin && !isParticipant) {
@@ -1246,6 +1253,10 @@ exports.verifyPickupOtpAndPickup = async (req, res) => {
 
     const { tokens, slab } = computeStageTokens(settings, distanceKm, 'pickup');
     if (!slab) return res.status(400).json(badRequest("No matching distance slab for pickup"));
+
+    console.log("slab : ", slab);
+    console.log("acceptedAt", booking.acceptedAt);
+    console.log("new Date() : ", new Date());
 
     // enforce min time from confirmation to pickup
     if (!booking.acceptedAt) return res.status(400).json(badRequest("Missing acceptedAt timestamp"));
@@ -1277,6 +1288,17 @@ exports.verifyPickupOtpAndPickup = async (req, res) => {
         userId
       );
     }
+
+    //Update customerRequestStatus
+    await customer_requests.updateOne(
+      { _id: customerRequest },
+      {
+        $set: {
+          status: new mongoose.Types.ObjectId(PICKEDUP_STATUS_ID),
+          updatedAt: new Date()
+        }
+      }
+    );
 
     return res.status(200).json(updated({ booking, reward: { stage: 'pickup', tokens } }, "Pickup confirmed"));
 
@@ -1325,6 +1347,10 @@ exports.verifyDeliveryOtpAndDeliver = async (req, res) => {
       return res.status(400).json(badRequest(deactivate ? "Too many attempts, OTP deactivated" : "Invalid OTP"));
     }
 
+    if (otp.addedBy.toString() !== userId) {
+      return res.status(400).json(badRequest("Only the OTP initiator can verify this code"));
+    }
+
     await BookingOtp.updateOne({ _id: otp._id }, { $set: { isActive: false, consumedAt: new Date(), updatedAt: new Date() } });
 
     const settings = await loadActiveRewardSettings();
@@ -1336,8 +1362,8 @@ exports.verifyDeliveryOtpAndDeliver = async (req, res) => {
     const { tokens, slab } = computeStageTokens(settings, distanceKm, 'delivery');
     if (!slab) return res.status(400).json(badRequest("No matching distance slab for delivery"));
 
-    if (!booking.pickupAt) return res.status(400).json(badRequest("Missing pickupAt timestamp"));
-    const thresholdViolation = assertTimeThreshold(slab, booking.pickupAt, new Date(), 'delivery');
+    if (!booking.pickupDate) return res.status(400).json(badRequest("Missing pickupAt timestamp"));
+    const thresholdViolation = assertTimeThreshold(slab, booking.pickupDate, new Date(), 'delivery');
     if (thresholdViolation) {
       return res.status(400).json(badRequest("Delivery too soon to qualify", thresholdViolation));
     }
@@ -1361,9 +1387,20 @@ exports.verifyDeliveryOtpAndDeliver = async (req, res) => {
         tokens,
         `Delivery reward (${distanceKm.toFixed(1)} km, booking ${bookingId})`,
         userId,
-        `booking:${bookingId}:delivery_reward`
+        // `booking:${bookingId}:delivery_reward`
       );
     }
+
+    //Update customerRequestStatus
+    await customer_requests.updateOne(
+      { _id: booking.customerRequest._id },
+      {
+        $set: {
+          status: new mongoose.Types.ObjectId(DELIVERED_STATUS_ID),
+          updatedAt: new Date()
+        }
+      }
+    );
 
     return res.status(200).json(updated({ booking, reward: { stage: 'delivery', tokens } }, "Delivery confirmed"));
 
