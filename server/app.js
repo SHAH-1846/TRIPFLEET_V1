@@ -39,6 +39,7 @@ const locationRoutes = require("./routes/locationRoutes");
 const subscriptionRoutes = require("./routes/subscriptionRoutes");
 const tokenRoutes = require("./routes/tokenRoutes");
 const connectRequestRoutes = require("./routes/connectRequestRoutes");
+const reviewRoutes = require("./routes/reviewRoutes");
 
 // Passport configuration
 const passport = require("passport");
@@ -170,6 +171,7 @@ apiV1.use("/locations", locationRoutes);
 apiV1.use("/subscriptions", subscriptionRoutes);
 apiV1.use("/tokens", tokenRoutes);
 apiV1.use("/connect-requests", connectRequestRoutes);
+apiV1.use("/reviews", reviewRoutes);
 
 // Mount API version
 app.use("/api/v1", apiV1);

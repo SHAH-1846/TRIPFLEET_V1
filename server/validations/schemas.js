@@ -645,6 +645,67 @@ const connectRequestSchemas = {
   }),
 };
 
+
+const reviewsSchemas = {
+  // Create a review after delivery/completion by either participant (driver or customer)
+  createReview: Joi.object({
+    // Core references (all required to tightly bind review to booking context)
+    bookingId: fields.objectId,
+    tripId: fields.objectId,
+    customerRequestId: fields.objectId,
+    connectRequestId: Joi.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+
+    // Parties
+    driverId: fields.objectId,
+    customerId: fields.objectId,
+
+    // Who is submitting this review: 'driver' or 'customer'
+    raterRole: Joi.string().valid('driver', 'customer').required(),
+
+    // Rating content
+    rating: Joi.number().integer().min(1).max(5).required(),
+    title: Joi.string().trim().max(120).optional(),
+    comment: Joi.string().trim().max(2000).optional(),
+
+    // Optional flags (usually server-controlled; keep optional for flexibility)
+    isPublished: Joi.boolean().optional()
+  })
+  .custom((val, helpers) => {
+    // Require either title or comment for meaningful content
+    if (!val.title && !val.comment) {
+      return helpers.error('any.invalid', { message: 'Provide at least title or comment' });
+    }
+    return val;
+  }, 'review content check'),
+
+  // Update own review (within edit window enforced in controller)
+  updateReview: Joi.object({
+    rating: Joi.number().integer().min(1).max(5).optional(),
+    title: Joi.string().trim().max(120).optional(),
+    comment: Joi.string().trim().max(2000).optional(),
+    isPublished: Joi.boolean().optional()
+  }).min(1),
+
+  // Report a review for moderation
+  reportReview: Joi.object({
+    reason: Joi.string().trim().max(500).required()
+  }),
+
+  // Query: list reviews for a given ratee (user profile)
+  listForUser: Joi.object({
+    userId: fields.objectId,
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(100).default(10)
+  }),
+
+  // Query: list reviews for a booking
+  listForBooking: Joi.object({
+    bookingId: fields.objectId,
+    page: Joi.number().integer().min(1).default(1),
+    limit: Joi.number().integer().min(1).max(100).default(10)
+  })
+};
+
 module.exports = {
   authSchemas,
   userSchemas,
@@ -660,4 +721,5 @@ module.exports = {
   fields,
   tokenSchemas,
   connectRequestSchemas,
+  reviewsSchemas
 };
