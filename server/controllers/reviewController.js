@@ -67,20 +67,20 @@ exports.create = async (req, res) => {
     if (String(booking.trip) !== value.tripId) {
       return res.status(400).json(badRequest('Trip mismatch for booking'));
     }
-    if (String(booking.customerRequest) !== value.customerRequest) {
+    if (String(booking.customerRequest) !== value.customerRequestId) {
       return res.status(400).json(badRequest('CustomerRequest mismatch for booking'));
     }
-    if (value.connectRequest && String(booking.connectRequest || '') !== value.connectRequest) {
+    if (value.connectRequestId && String(booking.connectRequest || '') !== value.connectRequestId) {
       // Allow empty if booking does not track connectRequest
       return res.status(400).json(badRequest('ConnectRequest mismatch for booking'));
     }
 
     // Create review
     const doc = await reviews.create({
-      booking: asId(value.booking),
-      trip: asId(value.trip),
-      customerRequest: asId(value.customerRequest),
-      connectRequest: value.connectRequest ? asId(value.connectRequest) : undefined,
+      booking: asId(value.bookingId),
+      trip: asId(value.tripId),
+      customerRequest: asId(value.customerRequestId),
+      connectRequest: value.connectRequestId ? asId(value.connectRequestId) : undefined,
 
       driver: asId(driverId),
       customer: asId(customerId),

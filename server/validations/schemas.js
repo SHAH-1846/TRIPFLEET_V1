@@ -653,7 +653,7 @@ const reviewsSchemas = {
     bookingId: fields.objectId,
     tripId: fields.objectId,
     customerRequestId: fields.objectId,
-    connectRequestId: Joi.string().regex(/^[0-9a-fA-F]{24}$/).optional(),
+    connectRequestId: Joi.string().regex(/^[0-9a-fA-F]{24}$/).required(),
 
     // Parties
     driverId: fields.objectId,
